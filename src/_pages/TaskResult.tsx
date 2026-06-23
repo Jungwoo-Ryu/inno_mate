@@ -52,7 +52,7 @@ const TaskResult: React.FC<TaskResultProps> = ({ setView }) => {
 
   return (
     <div ref={containerRef} className="app-content px-3 py-3">
-      <div className="w-[clamp(300px,92vw,400px)] mx-auto rounded-[22px] border border-white/[0.12] bg-black/70 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
+      <div className="innomate-panel mx-auto rounded-[22px] border border-white/[0.12] bg-black/70 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
         <div className="px-4 py-4 border-b border-white/[0.06] text-center">
           <p className="text-[10px] text-white/40 uppercase tracking-[0.15em]">
             InnoMate AI Super Agent

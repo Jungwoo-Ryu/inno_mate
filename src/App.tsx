@@ -241,15 +241,20 @@ function App() {
         <ToastContext.Provider value={{ showToast }}>
           <div className="app-shell">
             {isInitialized ? (
-              hasApiKey ? (
-                <SubscribedApp
-                  credits={credits}
-                  currentLanguage={currentLanguage}
-                  setLanguage={updateLanguage}
-                />
-              ) : (
-                <WelcomeScreen onOpenSettings={handleOpenSettings} />
-              )
+              <>
+                {hasApiKey ? (
+                  <SubscribedApp
+                    credits={credits}
+                    currentLanguage={currentLanguage}
+                    setLanguage={updateLanguage}
+                  />
+                ) : (
+                  <WelcomeScreen onOpenSettings={handleOpenSettings} />
+                )}
+                {isSettingsOpen && (
+                  <SettingsDialog open onOpenChange={handleCloseSettings} />
+                )}
+              </>
             ) : (
               <div className="app-content">
                 <div className="flex flex-col items-center gap-3">
@@ -260,12 +265,6 @@ function App() {
             )}
             <UpdateNotification />
           </div>
-          
-          {/* Settings Dialog */}
-          <SettingsDialog 
-            open={isSettingsOpen} 
-            onOpenChange={handleCloseSettings} 
-          />
           
           <Toast
             open={toastState.open}

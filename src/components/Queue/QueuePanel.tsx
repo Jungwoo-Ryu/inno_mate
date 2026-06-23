@@ -71,6 +71,17 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount, credits }) => 
     return () => clearTimeout(timer)
   }, [prompt, attachments])
 
+  useEffect(() => {
+    const cleanupFunctions = [
+      window.electronAPI.onSolutionStart(() => setIsRunning(true)),
+      window.electronAPI.onSolutionSuccess(() => setIsRunning(false)),
+      window.electronAPI.onSolutionError(() => setIsRunning(false)),
+      window.electronAPI.onProcessingNoScreenshots(() => setIsRunning(false)),
+      window.electronAPI.onResetView(() => setIsRunning(false))
+    ]
+    return () => cleanupFunctions.forEach((cleanup) => cleanup())
+  }, [])
+
   const handleScreenshot = async () => {
     try {
       const result = await window.electronAPI.triggerScreenshot()
@@ -121,8 +132,16 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount, credits }) => 
   }
 
   return (
-    <div className="w-[clamp(300px,92vw,420px)] mx-auto">
+    <div className="innomate-panel mx-auto">
       <div className="relative rounded-[22px] border border-white/[0.12] bg-black/70 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
+        {isRunning && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-[22px] bg-black/60 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
+              <p className="text-[11px] text-white/60">Agent 실행 중…</p>
+            </div>
+          </div>
+        )}
         <div className="absolute top-3 right-3 z-10">
           <QueueSettingsMenu screenshotCount={screenshotCount} />
         </div>

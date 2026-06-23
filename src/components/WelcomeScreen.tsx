@@ -21,7 +21,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onOpenSettings }) 
 
   return (
     <div ref={contentRef} className="app-content px-4 py-4">
-      <div className="w-[clamp(300px,92vw,380px)] mx-auto rounded-[22px] border border-white/[0.12] bg-black/70 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
+      <div className="innomate-panel mx-auto rounded-[22px] border border-white/[0.12] bg-black/70 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
         <div className="flex flex-col items-center px-5 pt-6 pb-4 text-center">
           <img
             src="/innomate-icon.png"
@@ -62,7 +62,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onOpenSettings }) 
             설정 열기
           </Button>
           <p className="mt-3 text-[10px] text-white/30 text-center leading-relaxed">
-            .env 또는 설정에서 API 키를 입력하세요
+            API 키가 없으면 설정에서 입력하면 .env에 저장됩니다
           </p>
         </div>
       </div>

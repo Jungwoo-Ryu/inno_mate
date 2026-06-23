@@ -3,10 +3,13 @@ import { OpenAI } from "openai"
 import { IProcessingHelperDeps } from "./main"
 import { ScreenshotHelper } from "./ScreenshotHelper"
 import { configHelper } from "./ConfigHelper"
-import { harnessRunner } from "./harness/HarnessRunner"
+import { harnessRunner, isAbortError } from "./harness/HarnessRunner"
 import { harnessWatcher } from "./harness/HarnessWatcher"
 import { loadAttachments } from "./attachments"
 import type { AgentRunResult } from "./harness/types"
+
+const GEMINI_OPENAI_BASE_URL =
+  "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 export class AgentOrchestrator {
   private deps: IProcessingHelperDeps
@@ -15,6 +18,7 @@ export class AgentOrchestrator {
   private currentAbortController: AbortController | null = null
   private pendingUserPrompt: string | undefined
   private pendingAttachmentPaths: string[] = []
+  private isProcessing = false
 
   constructor(deps: IProcessingHelperDeps) {
     this.deps = deps
@@ -39,7 +43,18 @@ export class AgentOrchestrator {
 
   private initializeAIClient(): void {
     const config = configHelper.loadConfig()
-    if (config.apiProvider === "openai" && config.apiKey) {
+    if (!config.apiKey) {
+      this.openaiClient = null
+      harnessRunner.setClient(this.openaiClient)
+      return
+    }
+
+    if (config.apiProvider === "gemini") {
+      this.openaiClient = new OpenAI({
+        apiKey: config.apiKey,
+        baseURL: GEMINI_OPENAI_BASE_URL
+      })
+    } else if (config.apiProvider === "openai") {
       this.openaiClient = new OpenAI({ apiKey: config.apiKey })
     } else {
       this.openaiClient = null
@@ -51,12 +66,15 @@ export class AgentOrchestrator {
     const mainWindow = this.deps.getMainWindow()
     if (!mainWindow) return
 
+    if (this.isProcessing) {
+      console.log("[AgentOrchestrator] Already processing, skipping duplicate request")
+      return
+    }
+
     const config = configHelper.loadConfig()
 
-    if (config.apiProvider !== "openai" || !this.openaiClient) {
-      if (config.apiKey?.startsWith("sk-") && !config.apiKey.startsWith("sk-ant-")) {
-        this.initializeAIClient()
-      }
+    if (!this.openaiClient) {
+      this.initializeAIClient()
       if (!this.openaiClient) {
         mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.API_KEY_INVALID)
         return
@@ -67,8 +85,6 @@ export class AgentOrchestrator {
     if (view !== "queue") {
       return
     }
-
-    mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
 
     const screenshotQueue = this.screenshotHelper.getScreenshotQueue()
     const hasAttachments = this.pendingAttachmentPaths.length > 0
@@ -84,8 +100,12 @@ export class AgentOrchestrator {
       return
     }
 
+    this.isProcessing = true
+    mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
+
     try {
       this.currentAbortController = new AbortController()
+      const { signal } = this.currentAbortController
 
       const screenshots = await Promise.all(
         existingScreenshots.map(async (filePath) => ({
@@ -94,6 +114,8 @@ export class AgentOrchestrator {
           data: fs.readFileSync(filePath).toString("base64")
         }))
       )
+
+      if (signal.aborted) return
 
       const userPrompt = this.pendingUserPrompt
       const attachmentPaths = [...this.pendingAttachmentPaths]
@@ -105,13 +127,18 @@ export class AgentOrchestrator {
       const result = await harnessRunner.runFromScreenshots(
         screenshots,
         userPrompt,
-        attachments
+        attachments,
+        signal
       )
 
-      if (this.currentAbortController.signal.aborted) return
+      if (signal.aborted) return
 
       this.handleResult(result)
     } catch (error: unknown) {
+      if (isAbortError(error)) {
+        console.log("[AgentOrchestrator] Agent run cancelled")
+        return
+      }
       const message = error instanceof Error ? error.message : String(error)
       mainWindow.webContents.send(
         this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
@@ -120,6 +147,7 @@ export class AgentOrchestrator {
       this.deps.setView("queue")
     } finally {
       this.currentAbortController = null
+      this.isProcessing = false
     }
   }
 
@@ -151,12 +179,12 @@ export class AgentOrchestrator {
     this.deps.setView("solutions")
   }
 
-  public cancelProcessing(): void {
+  public cancelOngoingRequests(): void {
+    console.log("[AgentOrchestrator] Cancelling ongoing agent run")
     this.currentAbortController?.abort()
     this.currentAbortController = null
-  }
-
-  public cancelOngoingRequests(): void {
-    this.cancelProcessing()
+    this.isProcessing = false
+    this.pendingUserPrompt = undefined
+    this.pendingAttachmentPaths = []
   }
 }

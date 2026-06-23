@@ -33,6 +33,11 @@ const electronAPI = {
   openSettingsPortal: () => ipcRenderer.invoke("open-settings-portal"),
   updateContentDimensions: (dimensions: { width: number; height: number }) =>
     ipcRenderer.invoke("update-content-dimensions", dimensions),
+  setWindowLayoutMode: (
+    mode: "compact" | "settings",
+    dimensions?: { width: number; height: number }
+  ) => ipcRenderer.invoke("set-window-layout-mode", mode, dimensions),
+  getWindowLayoutMode: () => ipcRenderer.invoke("get-window-layout-mode"),
   clearStore: () => ipcRenderer.invoke("clear-store"),
   getScreenshots: () => ipcRenderer.invoke("get-screenshots"),
   deleteScreenshot: (path: string) =>

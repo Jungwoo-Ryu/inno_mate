@@ -12,6 +12,7 @@ import {
   testMcpConnection,
   type McpServerConfig
 } from "./mcp/McpStore"
+import { DEFAULT_MODELS } from "./aiModels"
 
 export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   console.log("Initializing IPC handlers")
@@ -127,6 +128,22 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
       deps.setWindowDimensions(width, height)
     }
   )
+
+  ipcMain.handle(
+    "set-window-layout-mode",
+    (
+      _event,
+      mode: "compact" | "settings",
+      dimensions?: { width: number; height: number }
+    ) => {
+      deps.setWindowLayoutMode(mode, dimensions)
+      return { success: true, mode: deps.getWindowLayoutMode() }
+    }
+  )
+
+  ipcMain.handle("get-window-layout-mode", () => {
+    return deps.getWindowLayoutMode()
+  })
 
   // Screenshot management handlers
   ipcMain.handle("get-screenshots", async () => {
@@ -273,7 +290,7 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
       return {
         id,
         version: harness?.config.version ?? "?",
-        model: harness?.config.model ?? "gpt-4o",
+        model: harness?.config.model ?? DEFAULT_MODELS.openai.agent,
         tools: harness?.config.tools ?? [],
         delegates: harness?.config.delegates ?? []
       }

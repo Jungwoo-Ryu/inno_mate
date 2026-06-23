@@ -3,8 +3,14 @@ import fs from "node:fs"
 import path from "node:path"
 import { app } from "electron"
 import { EventEmitter } from "events"
-import { readEnvOverrides, hasEnvApiKey, getEnvSourceLabels } from "./envConfig"
+import { readEnvOverrides, getEnvSourceLabels, readHardcodedSecrets, type ApiKeySource } from "./envConfig"
+import { saveApiCredentialsToEnvFiles, saveGportalToEnvFiles } from "./envFileStore"
 import { OpenAI } from "openai"
+import {
+  type APIProvider,
+  DEFAULT_MODELS,
+  sanitizeModelSelection
+} from "./aiModels"
 
 interface Config {
   apiKey: string;
@@ -24,6 +30,7 @@ interface Config {
 export interface RuntimeConfig extends Config {
   gportalPassword: string;
   envSources: string[];
+  apiKeySource: ApiKeySource;
 }
 
 export class ConfigHelper extends EventEmitter {
@@ -31,14 +38,14 @@ export class ConfigHelper extends EventEmitter {
   private defaultConfig: Config = {
     apiKey: "",
     apiProvider: "openai",
-    extractionModel: "gpt-4o",
-    solutionModel: "gpt-4o",
-    debuggingModel: "gpt-4o",
+    extractionModel: DEFAULT_MODELS.openai.extraction,
+    solutionModel: DEFAULT_MODELS.openai.solution,
+    debuggingModel: DEFAULT_MODELS.openai.debugging,
     language: "python",
     opacity: 1.0,
     gportalUrl: "",
     gportalUsername: "",
-    agentModel: "gpt-4o",
+    agentModel: DEFAULT_MODELS.openai.agent,
     fontScale: 1.0
   };
 
@@ -73,52 +80,56 @@ export class ConfigHelper extends EventEmitter {
   /**
    * Validate and sanitize model selection to ensure only allowed models are used
    */
-  private sanitizeModelSelection(model: string, provider: "openai" | "gemini" | "anthropic"): string {
-    if (provider === "openai") {
-      // Only allow gpt-4o and gpt-4o-mini for OpenAI
-      const allowedModels = ['gpt-4o', 'gpt-4o-mini'];
-      if (!allowedModels.includes(model)) {
-        console.warn(`Invalid OpenAI model specified: ${model}. Using default model: gpt-4o`);
-        return 'gpt-4o';
-      }
-      return model;
-    } else if (provider === "gemini")  {
-      // Only allow gemini-1.5-pro and gemini-2.0-flash for Gemini
-      const allowedModels = ['gemini-1.5-pro', 'gemini-2.0-flash'];
-      if (!allowedModels.includes(model)) {
-        console.warn(`Invalid Gemini model specified: ${model}. Using default model: gemini-2.0-flash`);
-        return 'gemini-2.0-flash'; // Changed default to flash
-      }
-      return model;
-    }  else if (provider === "anthropic") {
-      // Only allow Claude models
-      const allowedModels = ['claude-3-7-sonnet-20250219', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'];
-      if (!allowedModels.includes(model)) {
-        console.warn(`Invalid Anthropic model specified: ${model}. Using default model: claude-3-7-sonnet-20250219`);
-        return 'claude-3-7-sonnet-20250219';
-      }
-      return model;
-    }
-    // Default fallback
-    return model;
+  private sanitizeModelSelection(
+    model: string,
+    provider: "openai" | "gemini" | "anthropic",
+    role: "extraction" | "solution" | "debugging" | "agent" = "solution"
+  ): string {
+    return sanitizeModelSelection(model, provider as APIProvider, role)
   }
 
   private applyEnvOverrides(config: Config): RuntimeConfig {
     const env = readEnvOverrides()
+    const hardcoded = readHardcodedSecrets()
     const merged: RuntimeConfig = {
       ...config,
-      gportalPassword: env.gportalPassword ?? "",
-      envSources: getEnvSourceLabels()
+      gportalPassword: env.gportalPassword ?? hardcoded.gportalPassword ?? "",
+      envSources: getEnvSourceLabels(),
+      apiKeySource: null
     }
 
-    if (env.apiKey) merged.apiKey = env.apiKey
+    if (env.apiKey) {
+      merged.apiKey = env.apiKey
+      merged.apiKeySource = "env"
+    } else if (hardcoded.apiKey) {
+      merged.apiKey = hardcoded.apiKey
+      merged.apiKeySource = "hardcoded"
+    } else if (config.apiKey?.trim()) {
+      merged.apiKey = config.apiKey
+      merged.apiKeySource = "config"
+    } else {
+      merged.apiKey = ""
+    }
+
+    if (env.apiProvider) merged.apiProvider = env.apiProvider
+    else if (hardcoded.apiProvider && merged.apiKeySource === "hardcoded") {
+      merged.apiProvider = hardcoded.apiProvider
+    }
+
     if (env.gportalUrl) merged.gportalUrl = env.gportalUrl
+    else if (hardcoded.gportalUrl) merged.gportalUrl = hardcoded.gportalUrl
+
     if (env.gportalUsername) merged.gportalUsername = env.gportalUsername
-    if (env.gportalPassword) merged.gportalPassword = env.gportalPassword
+    else if (hardcoded.gportalUsername) merged.gportalUsername = hardcoded.gportalUsername
+
     if (env.agentModel) {
       merged.agentModel = env.agentModel
       merged.solutionModel = env.agentModel
       merged.extractionModel = env.agentModel
+    } else if (hardcoded.agentModel) {
+      merged.agentModel = hardcoded.agentModel
+      merged.solutionModel = hardcoded.agentModel
+      merged.extractionModel = hardcoded.agentModel
     }
 
     return merged
@@ -137,13 +148,16 @@ export class ConfigHelper extends EventEmitter {
         }
         
         if (config.extractionModel) {
-          config.extractionModel = this.sanitizeModelSelection(config.extractionModel, config.apiProvider);
+          config.extractionModel = this.sanitizeModelSelection(config.extractionModel, config.apiProvider, "extraction");
         }
         if (config.solutionModel) {
-          config.solutionModel = this.sanitizeModelSelection(config.solutionModel, config.apiProvider);
+          config.solutionModel = this.sanitizeModelSelection(config.solutionModel, config.apiProvider, "solution");
         }
         if (config.debuggingModel) {
-          config.debuggingModel = this.sanitizeModelSelection(config.debuggingModel, config.apiProvider);
+          config.debuggingModel = this.sanitizeModelSelection(config.debuggingModel, config.apiProvider, "debugging");
+        }
+        if (config.agentModel) {
+          config.agentModel = this.sanitizeModelSelection(config.agentModel, config.apiProvider, "agent");
         }
         
         base = { ...this.defaultConfig, ...config };
@@ -190,54 +204,81 @@ export class ConfigHelper extends EventEmitter {
     try {
       const currentConfig = this.readConfigFromFile();
       let provider = updates.apiProvider || currentConfig.apiProvider;
-      
+      let savedApiKeyToEnv = false;
+
       // Auto-detect provider based on API key format if a new key is provided
       if (updates.apiKey && !updates.apiProvider) {
-        // If API key starts with "sk-", it's likely an OpenAI key
-        if (updates.apiKey.trim().startsWith('sk-')) {
-          provider = "openai";
-          console.log("Auto-detected OpenAI API key format");
-        } else if (updates.apiKey.trim().startsWith('sk-ant-')) {
+        if (updates.apiKey.trim().startsWith('sk-ant-')) {
           provider = "anthropic";
           console.log("Auto-detected Anthropic API key format");
+        } else if (updates.apiKey.trim().startsWith('sk-')) {
+          provider = "openai";
+          console.log("Auto-detected OpenAI API key format");
+        } else if (updates.apiKey.trim().startsWith('AQ.')) {
+          provider = "gemini";
+          console.log("Auto-detected Gemini API key format");
         } else {
           provider = "gemini";
           console.log("Using Gemini API key format (default)");
         }
         
-        // Update the provider in the updates object
         updates.apiProvider = provider;
+      }
+
+      if (updates.apiKey !== undefined && updates.apiKey.trim()) {
+        saveApiCredentialsToEnvFiles(
+          updates.apiKey.trim(),
+          provider,
+          updates.agentModel ?? updates.solutionModel ?? currentConfig.agentModel
+        );
+        savedApiKeyToEnv = true;
+      } else if (updates.apiProvider && updates.apiProvider !== currentConfig.apiProvider) {
+        const runtimeKey = this.applyEnvOverrides(currentConfig).apiKey?.trim()
+        if (runtimeKey) {
+          saveApiCredentialsToEnvFiles(
+            runtimeKey,
+            updates.apiProvider,
+            updates.agentModel ?? updates.solutionModel ?? currentConfig.agentModel
+          );
+        }
+      }
+
+      const nextGportalUrl = updates.gportalUrl ?? currentConfig.gportalUrl
+      const nextGportalUsername = updates.gportalUsername ?? currentConfig.gportalUsername
+      if (
+        updates.gportalUrl !== undefined ||
+        updates.gportalUsername !== undefined
+      ) {
+        saveGportalToEnvFiles(nextGportalUrl, nextGportalUsername)
       }
       
       // If provider is changing, reset models to the default for that provider
       if (updates.apiProvider && updates.apiProvider !== currentConfig.apiProvider) {
-        if (updates.apiProvider === "openai") {
-          updates.extractionModel = "gpt-4o";
-          updates.solutionModel = "gpt-4o";
-          updates.debuggingModel = "gpt-4o";
-        } else if (updates.apiProvider === "anthropic") {
-          updates.extractionModel = "claude-3-7-sonnet-20250219";
-          updates.solutionModel = "claude-3-7-sonnet-20250219";
-          updates.debuggingModel = "claude-3-7-sonnet-20250219";
-        } else {
-          updates.extractionModel = "gemini-2.0-flash";
-          updates.solutionModel = "gemini-2.0-flash";
-          updates.debuggingModel = "gemini-2.0-flash";
-        }
+        const defaults = DEFAULT_MODELS[updates.apiProvider as APIProvider]
+        updates.extractionModel = defaults.extraction
+        updates.solutionModel = defaults.solution
+        updates.debuggingModel = defaults.debugging
+        updates.agentModel = defaults.agent
       }
       
       // Sanitize model selections in the updates
       if (updates.extractionModel) {
-        updates.extractionModel = this.sanitizeModelSelection(updates.extractionModel, provider);
+        updates.extractionModel = this.sanitizeModelSelection(updates.extractionModel, provider, "extraction");
       }
       if (updates.solutionModel) {
-        updates.solutionModel = this.sanitizeModelSelection(updates.solutionModel, provider);
+        updates.solutionModel = this.sanitizeModelSelection(updates.solutionModel, provider, "solution");
       }
       if (updates.debuggingModel) {
-        updates.debuggingModel = this.sanitizeModelSelection(updates.debuggingModel, provider);
+        updates.debuggingModel = this.sanitizeModelSelection(updates.debuggingModel, provider, "debugging");
+      }
+      if (updates.agentModel) {
+        updates.agentModel = this.sanitizeModelSelection(updates.agentModel, provider, "agent");
       }
       
       const newConfig = { ...currentConfig, ...updates };
+      if (savedApiKeyToEnv) {
+        newConfig.apiKey = "";
+      }
       this.saveConfig(newConfig);
 
       const runtime = this.applyEnvOverrides(newConfig);
@@ -264,9 +305,8 @@ export class ConfigHelper extends EventEmitter {
    * Check if the API key is configured
    */
   public hasApiKey(): boolean {
-    if (hasEnvApiKey()) return true
     const config = this.loadConfig();
-    return !!config.apiKey && config.apiKey.trim().length > 0;
+    return Boolean(config.apiKey?.trim());
   }
   
   /**

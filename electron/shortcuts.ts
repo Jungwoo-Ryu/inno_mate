@@ -48,6 +48,8 @@ export class ShortcutsHelper {
     })
 
     globalShortcut.register("CommandOrControl+Enter", async () => {
+      // Renderer Cmd+Enter may sync prompt via IPC first; brief delay avoids duplicate/racy runs
+      await new Promise((resolve) => setTimeout(resolve, 80))
       await this.deps.processingHelper?.processScreenshots()
     })
 

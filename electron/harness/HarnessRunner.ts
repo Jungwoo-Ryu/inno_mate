@@ -4,8 +4,24 @@ import { harnessLoader } from "./HarnessLoader"
 import { classifyIntent } from "./IntentClassifier"
 import type { AgentRunResult, AttachmentPayload, LoadedHarness, ScreenshotPayload } from "./types"
 import { getGPortalTools, executeGPortalTool } from "../gportal/tools"
+import { configHelper } from "../ConfigHelper"
+import { DEFAULT_MODELS } from "../aiModels"
 
 const MAX_TOOL_ROUNDS = 8
+
+function throwIfAborted(signal?: AbortSignal): void {
+  signal?.throwIfAborted()
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof Error && error.name === "AbortError") ||
+    (typeof error === "object" &&
+      error !== null &&
+      "name" in error &&
+      (error as { name: string }).name === "AbortError")
+  )
+}
 
 function buildTools(harness: LoadedHarness): ChatCompletionTool[] {
   const allTools = getGPortalTools()
@@ -24,8 +40,10 @@ export class HarnessRunner {
   async runFromScreenshots(
     screenshots: ScreenshotPayload[],
     userPrompt?: string,
-    attachments: AttachmentPayload[] = []
+    attachments: AttachmentPayload[] = [],
+    signal?: AbortSignal
   ): Promise<AgentRunResult> {
+    throwIfAborted(signal)
     if (!this.client) {
       return {
         status: "error",
@@ -46,7 +64,13 @@ export class HarnessRunner {
         message_ko: "스크린샷, 파일 첨부, 또는 업무 내용 입력 중 하나 이상이 필요합니다."
       }
     } else {
-      const classification = await classifyIntent(this.client, screenshots)
+      const config = configHelper.loadConfig()
+      const classification = await classifyIntent(
+        this.client,
+        screenshots,
+        config.extractionModel || DEFAULT_MODELS.openai.classifier,
+        signal
+      )
       agentId =
         classification.agentId === "super"
           ? "meeting-room"
@@ -73,7 +97,7 @@ export class HarnessRunner {
       }
     }
 
-    return this.runHarness(harness, screenshots, userPrompt, extractedFields, attachments)
+    return this.runHarness(harness, screenshots, userPrompt, extractedFields, attachments, signal)
   }
 
   private buildUserContent(
@@ -136,7 +160,8 @@ export class HarnessRunner {
     screenshots: ScreenshotPayload[],
     userPrompt?: string,
     extractedFields?: Record<string, string>,
-    attachments: AttachmentPayload[] = []
+    attachments: AttachmentPayload[] = [],
+    signal?: AbortSignal
   ): Promise<AgentRunResult> {
     if (!this.client) {
       return {
@@ -160,15 +185,25 @@ export class HarnessRunner {
     ]
 
     const tools = buildTools(harness)
-    const model = harness.config.model || "gpt-4o"
+    const config = configHelper.loadConfig()
+    const model =
+      config.agentModel ||
+      config.solutionModel ||
+      harness.config.model ||
+      DEFAULT_MODELS.openai.agent
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const response = await this.client.chat.completions.create({
-        model,
-        messages,
-        tools: tools.length > 0 ? tools : undefined,
-        tool_choice: tools.length > 0 ? "auto" : undefined
-      })
+      throwIfAborted(signal)
+
+      const response = await this.client.chat.completions.create(
+        {
+          model,
+          messages,
+          tools: tools.length > 0 ? tools : undefined,
+          tool_choice: tools.length > 0 ? "auto" : undefined
+        },
+        signal ? { signal } : undefined
+      )
 
       const choice = response.choices[0]
       if (!choice) break
@@ -178,6 +213,7 @@ export class HarnessRunner {
 
       if (msg.tool_calls?.length) {
         for (const call of msg.tool_calls) {
+          throwIfAborted(signal)
           if (call.type !== "function") continue
           const args = JSON.parse(call.function.arguments || "{}")
           const toolResult = await executeGPortalTool(call.function.name, args)
@@ -216,3 +252,5 @@ export class HarnessRunner {
 }
 
 export const harnessRunner = new HarnessRunner()
+
+export { isAbortError }

@@ -1,10 +1,13 @@
 /**
  * Environment variable keys for InnoMate.
- * Copy `.env.example` to `.env` and fill in values.
- * Env vars take precedence over config.json / UI settings.
+ * API 키는 .env, 하드코딩, config.json 순으로 해석됩니다.
+ * UI에서 저장하면 로컬 .env 파일에 기록됩니다.
  */
 export const ENV = {
   OPENAI_API_KEY: "OPENAI_API_KEY",
+  GEMINI_API_KEY: "GEMINI_API_KEY",
+  ANTHROPIC_API_KEY: "ANTHROPIC_API_KEY",
+  INNOMATE_API_PROVIDER: "INNOMATE_API_PROVIDER",
   GPORTAL_URL: "GPORTAL_URL",
   GPORTAL_USERNAME: "GPORTAL_USERNAME",
   GPORTAL_PASSWORD: "GPORTAL_PASSWORD",
@@ -14,19 +17,88 @@ export const ENV = {
   GH_TOKEN: "GH_TOKEN"
 } as const
 
+export type APIProviderEnv = "openai" | "gemini" | "anthropic"
+
 export interface EnvOverrides {
   apiKey?: string
+  apiProvider?: APIProviderEnv
   gportalUrl?: string
   gportalUsername?: string
   gportalPassword?: string
   agentModel?: string
 }
 
+/**
+ * 개발용 하드코딩 fallback.
+ * 커밋하지 않을 키를 여기에 넣거나, 빈 채로 두고 .env / UI 입력을 사용하세요.
+ */
+export const HARDCODED_SECRETS: EnvOverrides = {
+  // apiKey: "your-api-key",
+  // apiProvider: "gemini",
+}
+
+export function readHardcodedSecrets(): EnvOverrides {
+  const out: EnvOverrides = {}
+  const key = HARDCODED_SECRETS.apiKey?.trim()
+  if (key) {
+    out.apiKey = key
+    out.apiProvider = HARDCODED_SECRETS.apiProvider
+  }
+  if (HARDCODED_SECRETS.gportalUrl?.trim()) {
+    out.gportalUrl = HARDCODED_SECRETS.gportalUrl.trim()
+  }
+  if (HARDCODED_SECRETS.gportalUsername?.trim()) {
+    out.gportalUsername = HARDCODED_SECRETS.gportalUsername.trim()
+  }
+  if (HARDCODED_SECRETS.gportalPassword?.trim()) {
+    out.gportalPassword = HARDCODED_SECRETS.gportalPassword.trim()
+  }
+  if (HARDCODED_SECRETS.agentModel?.trim()) {
+    out.agentModel = HARDCODED_SECRETS.agentModel.trim()
+  }
+  return out
+}
+
+function parseProvider(value: string | undefined): APIProviderEnv | undefined {
+  if (value === "gemini" || value === "anthropic" || value === "openai") {
+    return value
+  }
+  return undefined
+}
+
 export function readEnvOverrides(): EnvOverrides {
   const overrides: EnvOverrides = {}
 
-  const apiKey = process.env[ENV.OPENAI_API_KEY]?.trim()
-  if (apiKey) overrides.apiKey = apiKey
+  const geminiKey = process.env[ENV.GEMINI_API_KEY]?.trim()
+  const openaiKey = process.env[ENV.OPENAI_API_KEY]?.trim()
+  const anthropicKey = process.env[ENV.ANTHROPIC_API_KEY]?.trim()
+  const envProvider = parseProvider(
+    process.env[ENV.INNOMATE_API_PROVIDER]?.trim().toLowerCase()
+  )
+
+  if (envProvider === "openai" && openaiKey) {
+    overrides.apiKey = openaiKey
+    overrides.apiProvider = "openai"
+  } else if (envProvider === "gemini" && geminiKey) {
+    overrides.apiKey = geminiKey
+    overrides.apiProvider = "gemini"
+  } else if (envProvider === "anthropic" && anthropicKey) {
+    overrides.apiKey = anthropicKey
+    overrides.apiProvider = "anthropic"
+  } else if (geminiKey) {
+    overrides.apiKey = geminiKey
+    overrides.apiProvider = "gemini"
+  } else if (openaiKey) {
+    overrides.apiKey = openaiKey
+    overrides.apiProvider = "openai"
+  } else if (anthropicKey) {
+    overrides.apiKey = anthropicKey
+    overrides.apiProvider = "anthropic"
+  }
+
+  if (envProvider) {
+    overrides.apiProvider = envProvider
+  }
 
   const gportalUrl = process.env[ENV.GPORTAL_URL]?.trim()
   if (gportalUrl) overrides.gportalUrl = gportalUrl
@@ -44,7 +116,15 @@ export function readEnvOverrides(): EnvOverrides {
 }
 
 export function hasEnvApiKey(): boolean {
-  return Boolean(process.env[ENV.OPENAI_API_KEY]?.trim())
+  return Boolean(
+    process.env[ENV.GEMINI_API_KEY]?.trim() ||
+      process.env[ENV.OPENAI_API_KEY]?.trim() ||
+      process.env[ENV.ANTHROPIC_API_KEY]?.trim()
+  )
+}
+
+export function hasHardcodedApiKey(): boolean {
+  return Boolean(HARDCODED_SECRETS.apiKey?.trim())
 }
 
 export function hasEnvGportalConfig(): boolean {
@@ -57,10 +137,21 @@ export function hasEnvGportalConfig(): boolean {
 
 export function getEnvSourceLabels(): string[] {
   const labels: string[] = []
-  if (hasEnvApiKey()) labels.push("OPENAI_API_KEY")
+  if (process.env[ENV.GEMINI_API_KEY]?.trim()) labels.push("GEMINI_API_KEY")
+  if (process.env[ENV.OPENAI_API_KEY]?.trim()) labels.push("OPENAI_API_KEY")
+  if (process.env[ENV.ANTHROPIC_API_KEY]?.trim()) labels.push("ANTHROPIC_API_KEY")
+  if (process.env[ENV.INNOMATE_API_PROVIDER]?.trim()) labels.push("INNOMATE_API_PROVIDER")
   if (process.env[ENV.GPORTAL_URL]?.trim()) labels.push("GPORTAL_URL")
   if (process.env[ENV.GPORTAL_USERNAME]?.trim()) labels.push("GPORTAL_USERNAME")
   if (process.env[ENV.GPORTAL_PASSWORD]?.trim()) labels.push("GPORTAL_PASSWORD")
   if (process.env[ENV.INNOMATE_AGENT_MODEL]?.trim()) labels.push("INNOMATE_AGENT_MODEL")
   return labels
+}
+
+export type ApiKeySource = "env" | "hardcoded" | "config" | null
+
+export function resolveApiKeySource(): ApiKeySource {
+  if (hasEnvApiKey()) return "env"
+  if (hasHardcodedApiKey()) return "hardcoded"
+  return null
 }

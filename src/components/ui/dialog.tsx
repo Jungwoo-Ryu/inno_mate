@@ -23,7 +23,7 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, style, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
@@ -35,7 +35,7 @@ const DialogContent = React.forwardRef<
         "focus:outline-none focus-visible:ring-0",
         className
       )}
-      style={{ maxHeight: '90vh', overflow: 'auto' }}
+      style={{ maxHeight: "90vh", overflow: "auto", ...style }}
       {...props}
     >
       {children}

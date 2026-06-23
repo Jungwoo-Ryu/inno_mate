@@ -8,7 +8,7 @@
     "meeting-room.search",
     "meeting-room.reserve"
   ],
-  "model": "gpt-4o",
-  "classifierModel": "gpt-4o-mini",
+  "model": "gpt-5.5",
+  "classifierModel": "gpt-5.4-mini",
   "scenarios": ["scenarios/happy-path.md"]
 }

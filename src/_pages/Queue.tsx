@@ -79,7 +79,7 @@ const Queue: React.FC<QueueProps> = ({ setView, credits }) => {
 
   return (
     <div ref={contentRef} className="app-content px-3 py-3">
-      <div className="flex flex-col items-center gap-3 w-full">
+      <div className="flex flex-col items-center gap-3 w-fit">
         {screenshots.length > 0 && (
           <ScreenshotQueue
             isLoading={false}

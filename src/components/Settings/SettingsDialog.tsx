@@ -1,174 +1,35 @@
-import { useState, useEffect } from "react";
-import {
-  Dialog,
-  DialogTrigger,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "../ui/dialog";
+import { useState, useEffect, useLayoutEffect } from "react";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
-import { Settings } from "lucide-react";
 import { useToast } from "../../contexts/toast";
-
-type APIProvider = "openai" | "gemini" | "anthropic";
-
-type AIModel = {
-  id: string;
-  name: string;
-  description: string;
-};
+import {
+  type APIProvider,
+  DEFAULT_MODELS,
+  modelsForProvider
+} from "../../constants/aiModels";
+import { requestLayoutRemeasure } from "../../hooks/useContentDimensions";
 
 type ModelCategory = {
-  key: 'extractionModel' | 'solutionModel' | 'debuggingModel';
+  key: "extractionModel" | "solutionModel" | "debuggingModel";
   title: string;
   description: string;
-  openaiModels: AIModel[];
-  geminiModels: AIModel[];
-  anthropicModels: AIModel[];
 };
 
-// Define available models for each category
 const modelCategories: ModelCategory[] = [
   {
-    key: 'extractionModel',
-    title: 'Problem Extraction',
-    description: 'Model used to analyze screenshots and extract problem details',
-    openaiModels: [
-      {
-        id: "gpt-4o",
-        name: "gpt-4o",
-        description: "Best overall performance for problem extraction"
-      },
-      {
-        id: "gpt-4o-mini",
-        name: "gpt-4o-mini",
-        description: "Faster, more cost-effective option"
-      }
-    ],
-    geminiModels: [
-      {
-        id: "gemini-1.5-pro",
-        name: "Gemini 1.5 Pro",
-        description: "Best overall performance for problem extraction"
-      },
-      {
-        id: "gemini-2.0-flash",
-        name: "Gemini 2.0 Flash",
-        description: "Faster, more cost-effective option"
-      }
-    ],
-    anthropicModels: [
-      {
-        id: "claude-3-7-sonnet-20250219",
-        name: "Claude 3.7 Sonnet",
-        description: "Best overall performance for problem extraction"
-      },
-      {
-        id: "claude-3-5-sonnet-20241022",
-        name: "Claude 3.5 Sonnet",
-        description: "Balanced performance and speed"
-      },
-      {
-        id: "claude-3-opus-20240229",
-        name: "Claude 3 Opus",
-        description: "Top-level intelligence, fluency, and understanding"
-      }
-    ]
+    key: "extractionModel",
+    title: "Problem Extraction",
+    description: "Model used to analyze screenshots and extract problem details"
   },
   {
-    key: 'solutionModel',
-    title: 'Solution Generation',
-    description: 'Model used to generate coding solutions',
-    openaiModels: [
-      {
-        id: "gpt-4o",
-        name: "gpt-4o",
-        description: "Strong overall performance for coding tasks"
-      },
-      {
-        id: "gpt-4o-mini",
-        name: "gpt-4o-mini",
-        description: "Faster, more cost-effective option"
-      }
-    ],
-    geminiModels: [
-      {
-        id: "gemini-1.5-pro",
-        name: "Gemini 1.5 Pro",
-        description: "Strong overall performance for coding tasks"
-      },
-      {
-        id: "gemini-2.0-flash",
-        name: "Gemini 2.0 Flash",
-        description: "Faster, more cost-effective option"
-      }
-    ],
-    anthropicModels: [
-      {
-        id: "claude-3-7-sonnet-20250219",
-        name: "Claude 3.7 Sonnet",
-        description: "Strong overall performance for coding tasks"
-      },
-      {
-        id: "claude-3-5-sonnet-20241022",
-        name: "Claude 3.5 Sonnet",
-        description: "Balanced performance and speed"
-      },
-      {
-        id: "claude-3-opus-20240229",
-        name: "Claude 3 Opus",
-        description: "Top-level intelligence, fluency, and understanding"
-      }
-    ]
+    key: "solutionModel",
+    title: "Solution Generation",
+    description: "Model used to generate coding solutions"
   },
   {
-    key: 'debuggingModel',
-    title: 'Debugging',
-    description: 'Model used to debug and improve solutions',
-    openaiModels: [
-      {
-        id: "gpt-4o",
-        name: "gpt-4o",
-        description: "Best for analyzing code and error messages"
-      },
-      {
-        id: "gpt-4o-mini",
-        name: "gpt-4o-mini",
-        description: "Faster, more cost-effective option"
-      }
-    ],
-    geminiModels: [
-      {
-        id: "gemini-1.5-pro",
-        name: "Gemini 1.5 Pro",
-        description: "Best for analyzing code and error messages"
-      },
-      {
-        id: "gemini-2.0-flash",
-        name: "Gemini 2.0 Flash",
-        description: "Faster, more cost-effective option"
-      }
-    ],
-    anthropicModels: [
-      {
-        id: "claude-3-7-sonnet-20250219",
-        name: "Claude 3.7 Sonnet",
-        description: "Best for analyzing code and error messages"
-      },
-      {
-        id: "claude-3-5-sonnet-20241022",
-        name: "Claude 3.5 Sonnet",
-        description: "Balanced performance and speed"
-      },
-      {
-        id: "claude-3-opus-20240229",
-        name: "Claude 3 Opus",
-        description: "Top-level intelligence, fluency, and understanding"
-      }
-    ]
+    key: "debuggingModel",
+    title: "Debugging",
+    description: "Model used to debug and improve solutions"
   }
 ];
 
@@ -177,93 +38,91 @@ interface SettingsDialogProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDialogProps) {
+export function SettingsDialog({
+  open: externalOpen = true,
+  onOpenChange
+}: SettingsDialogProps) {
   const { showToast } = useToast();
-  const [open, setOpen] = useState(externalOpen || false);
+  const [open, setOpen] = useState(externalOpen);
   const [isLoading, setIsLoading] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [apiProvider, setApiProvider] = useState<APIProvider>("openai");
-  const [extractionModel, setExtractionModel] = useState("gpt-4o");
-  const [solutionModel, setSolutionModel] = useState("gpt-4o");
-  const [debuggingModel, setDebuggingModel] = useState("gpt-4o");
+  const [extractionModel, setExtractionModel] = useState(DEFAULT_MODELS.openai.extraction);
+  const [solutionModel, setSolutionModel] = useState(DEFAULT_MODELS.openai.solution);
+  const [debuggingModel, setDebuggingModel] = useState(DEFAULT_MODELS.openai.debugging);
   const [gportalUrl, setGportalUrl] = useState("");
   const [gportalUsername, setGportalUsername] = useState("");
-  const [fontScale, setFontScale] = useState(1.0);
   const [envSources, setEnvSources] = useState<string[]>([]);
+  const [apiKeySource, setApiKeySource] = useState<"env" | "hardcoded" | "config" | null>(null);
 
-  // Sync with external open state
   useEffect(() => {
-    if (externalOpen !== undefined) {
-      setOpen(externalOpen);
-    }
+    setOpen(externalOpen);
   }, [externalOpen]);
 
-  // Handle open state changes
   const handleOpenChange = (newOpen: boolean) => {
     setOpen(newOpen);
-    // Only call onOpenChange when there's actually a change
-    if (onOpenChange && newOpen !== externalOpen) {
-      onOpenChange(newOpen);
-    }
+    onOpenChange?.(newOpen);
   };
-  
-  // Load current config on dialog open
-  useEffect(() => {
-    if (open) {
-      setIsLoading(true);
-      interface Config {
-        apiKey?: string;
-        apiProvider?: APIProvider;
-        extractionModel?: string;
-        solutionModel?: string;
-        debuggingModel?: string;
-        gportalUrl?: string;
-        gportalUsername?: string;
-        fontScale?: number;
-        envSources?: string[];
-      }
 
-      window.electronAPI
-        .getConfig()
-        .then((config: Config) => {
-          setApiKey(config.apiKey || "");
-          setApiProvider(config.apiProvider || "openai");
-          setExtractionModel(config.extractionModel || "gpt-4o");
-          setSolutionModel(config.solutionModel || "gpt-4o");
-          setDebuggingModel(config.debuggingModel || "gpt-4o");
-          setGportalUrl(config.gportalUrl || "");
-          setGportalUsername(config.gportalUsername || "");
-          setFontScale(config.fontScale ?? 1.0);
-          setEnvSources(config.envSources ?? []);
-        })
-        .catch((error: unknown) => {
-          console.error("Failed to load config:", error);
-          showToast("오류", "설정을 불러오지 못했습니다", "error");
-        })
-        .finally(() => {
-          setIsLoading(false);
-        });
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    void window.electronAPI.setWindowLayoutMode("settings", {
+      width: 500,
+      height: 680
+    });
+
+    return () => {
+      void window.electronAPI.setWindowLayoutMode("compact").then(() => {
+        requestLayoutRemeasure();
+      });
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    setIsLoading(true);
+    interface Config {
+      apiKey?: string;
+      apiProvider?: APIProvider;
+      extractionModel?: string;
+      solutionModel?: string;
+      debuggingModel?: string;
+      gportalUrl?: string;
+      gportalUsername?: string;
+      envSources?: string[];
+      apiKeySource?: "env" | "hardcoded" | "config" | null;
     }
+
+    window.electronAPI
+      .getConfig()
+      .then((config: Config) => {
+        setApiKey(config.apiKey || "");
+        setApiProvider(config.apiProvider || "openai");
+        setExtractionModel(config.extractionModel || DEFAULT_MODELS.openai.extraction);
+        setSolutionModel(config.solutionModel || DEFAULT_MODELS.openai.solution);
+        setDebuggingModel(config.debuggingModel || DEFAULT_MODELS.openai.debugging);
+        setGportalUrl(config.gportalUrl || "");
+        setGportalUsername(config.gportalUsername || "");
+        setEnvSources(config.envSources ?? []);
+        setApiKeySource(config.apiKeySource ?? null);
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to load config:", error);
+        showToast("오류", "설정을 불러오지 못했습니다", "error");
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
   }, [open, showToast]);
 
-  // Handle API provider change
   const handleProviderChange = (provider: APIProvider) => {
     setApiProvider(provider);
-    
-    // Reset models to defaults when changing provider
-    if (provider === "openai") {
-      setExtractionModel("gpt-4o");
-      setSolutionModel("gpt-4o");
-      setDebuggingModel("gpt-4o");
-    } else if (provider === "gemini") {
-      setExtractionModel("gemini-1.5-pro");
-      setSolutionModel("gemini-1.5-pro");
-      setDebuggingModel("gemini-1.5-pro");
-    } else if (provider === "anthropic") {
-      setExtractionModel("claude-3-7-sonnet-20250219");
-      setSolutionModel("claude-3-7-sonnet-20250219");
-      setDebuggingModel("claude-3-7-sonnet-20250219");
-    }
+    const defaults = DEFAULT_MODELS[provider];
+    setExtractionModel(defaults.extraction);
+    setSolutionModel(defaults.solution);
+    setDebuggingModel(defaults.debugging);
   };
 
   const handleSave = async () => {
@@ -275,17 +134,14 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         extractionModel,
         solutionModel,
         debuggingModel,
+        agentModel: solutionModel,
         gportalUrl,
-        gportalUsername,
-        fontScale,
+        gportalUsername
       });
-      
+
       if (result) {
-        document.documentElement.style.fontSize = `${fontScale * 100}%`;
-        showToast("완료", "설정이 저장되었습니다", "success");
+        showToast("완료", "설정이 저장되었습니다 (.env)", "success");
         handleOpenChange(false);
-        
-        // Force reload the app to apply the API key
         setTimeout(() => {
           window.location.reload();
         }, 1500);
@@ -298,336 +154,184 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
     }
   };
 
-  // Mask API key for display
   const maskApiKey = (key: string) => {
     if (!key || key.length < 10) return "";
     return `${key.substring(0, 4)}...${key.substring(key.length - 4)}`;
   };
 
-  // Open external link handler
-  const openExternalLink = (url: string) => {
-    window.electronAPI.openLink(url);
-  };
+  const apiKeySourceLabel =
+    apiKeySource === "env"
+      ? ".env"
+      : apiKeySource === "hardcoded"
+      ? "하드코딩"
+      : apiKeySource === "config"
+      ? "config.json"
+      : null;
 
-  const envLocksGportal = envSources.some((k) =>
-    ["GPORTAL_URL", "GPORTAL_USERNAME", "GPORTAL_PASSWORD"].includes(k)
-  );
-  const envLocksApiKey = envSources.includes("OPENAI_API_KEY");
-  const canSave = Boolean(apiKey) || envLocksApiKey;
+  const canSave = Boolean(apiKey.trim());
+
+  if (!open) return null;
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent 
-        className="sm:max-w-md bg-black border border-white/10 text-white settings-dialog"
-        style={{
-          position: 'fixed',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: 'min(450px, 90vw)',
-          height: 'auto',
-          minHeight: '400px',
-          maxHeight: '90vh',
-          overflowY: 'auto',
-          zIndex: 9999,
-          margin: 0,
-          padding: '20px',
-          transition: 'opacity 0.25s ease, transform 0.25s ease',
-          animation: 'fadeIn 0.25s ease forwards',
-          opacity: 0.98
-        }}
-      >        
-        <DialogHeader>
-          <DialogTitle>InnoMate 설정</DialogTitle>
-          <DialogDescription className="text-white/70">
-            OpenAI API 키와 G-portal 연결 정보를 설정하세요.
-            프로젝트 루트 <code className="text-white/90">.env</code> 파일로도 설정할 수 있으며, 환경 변수가 우선 적용됩니다.
-          </DialogDescription>
-        </DialogHeader>
-        {envSources.length > 0 && (
-          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-            .env에서 로드됨: {envSources.join(", ")}
-          </div>
-        )}
-        <div className="space-y-4 py-4">
-          {/* API Provider Selection */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-white">API Provider</label>
-            <div className="flex gap-2">
-              <div
-                className={`flex-1 p-2 rounded-lg cursor-pointer transition-colors ${
-                  apiProvider === "openai"
-                    ? "bg-white/10 border border-white/20"
-                    : "bg-black/30 border border-white/5 hover:bg-white/5"
-                }`}
-                onClick={() => handleProviderChange("openai")}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className={`w-3 h-3 rounded-full ${
-                      apiProvider === "openai" ? "bg-white" : "bg-white/20"
+    <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="InnoMate 설정">
+      <div className="settings-panel">
+        <header className="settings-panel-header">
+          <h1 className="text-lg font-semibold text-white">InnoMate 설정</h1>
+          <p className="text-sm text-white/70 mt-1">
+            API 키가 없으면 입력 후 저장하면 로컬 <code className="text-white/90">.env</code>에
+            기록됩니다. 하드코딩(<code className="text-white/90">electron/envConfig.ts</code>)도
+            지원합니다.
+          </p>
+          {apiKeySourceLabel && (
+            <div className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70">
+              현재 API 키 출처: {apiKeySourceLabel}
+            </div>
+          )}
+          {envSources.length > 0 && (
+            <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+              .env 변수: {envSources.join(", ")}
+            </div>
+          )}
+        </header>
+
+        <div className="settings-panel-scroll">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-white">API Provider</label>
+              <div className="flex gap-2">
+                {(
+                  [
+                    ["openai", "OpenAI", "GPT-5.5 · GPT-5.4"],
+                    ["gemini", "Gemini", "Gemini 3.5 Flash"],
+                    ["anthropic", "Claude", "Claude 4.6 · 4.7"]
+                  ] as const
+                ).map(([id, label, sub]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => handleProviderChange(id)}
+                    className={`flex-1 p-2 rounded-lg text-left transition-colors ${
+                      apiProvider === id
+                        ? "bg-white/10 border border-white/20"
+                        : "bg-black/30 border border-white/5 hover:bg-white/5"
                     }`}
-                  />
-                  <div className="flex flex-col">
-                    <p className="font-medium text-white text-sm">OpenAI</p>
-                    <p className="text-xs text-white/60">GPT-4o models</p>
-                  </div>
-                </div>
-              </div>
-              <div
-                className={`flex-1 p-2 rounded-lg cursor-pointer transition-colors ${
-                  apiProvider === "gemini"
-                    ? "bg-white/10 border border-white/20"
-                    : "bg-black/30 border border-white/5 hover:bg-white/5"
-                }`}
-                onClick={() => handleProviderChange("gemini")}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className={`w-3 h-3 rounded-full ${
-                      apiProvider === "gemini" ? "bg-white" : "bg-white/20"
-                    }`}
-                  />
-                  <div className="flex flex-col">
-                    <p className="font-medium text-white text-sm">Gemini</p>
-                    <p className="text-xs text-white/60">Gemini 1.5 models</p>
-                  </div>
-                </div>
-              </div>
-              <div
-                className={`flex-1 p-2 rounded-lg cursor-pointer transition-colors ${
-                  apiProvider === "anthropic"
-                    ? "bg-white/10 border border-white/20"
-                    : "bg-black/30 border border-white/5 hover:bg-white/5"
-                }`}
-                onClick={() => handleProviderChange("anthropic")}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className={`w-3 h-3 rounded-full ${
-                      apiProvider === "anthropic" ? "bg-white" : "bg-white/20"
-                    }`}
-                  />
-                  <div className="flex flex-col">
-                    <p className="font-medium text-white text-sm">Claude</p>
-                    <p className="text-xs text-white/60">Claude 3 models</p>
-                  </div>
-                </div>
+                  >
+                    <p className="font-medium text-white text-sm">{label}</p>
+                    <p className="text-xs text-white/60">{sub}</p>
+                  </button>
+                ))}
               </div>
             </div>
-          </div>
-          
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-white" htmlFor="apiKey">
-            {apiProvider === "openai" ? "OpenAI API Key" : 
-             apiProvider === "gemini" ? "Gemini API Key" : 
-             "Anthropic API Key"}
-            </label>
-            <Input
-              id="apiKey"
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              disabled={envLocksApiKey}
-              placeholder={
-                envLocksApiKey ? "OPENAI_API_KEY (.env)" :
-                apiProvider === "openai" ? "sk-..." : 
-                apiProvider === "gemini" ? "Enter your Gemini API key" :
-                "sk-ant-..."
-              }
-              className="bg-black/50 border-white/10 text-white disabled:opacity-50"
-            />
-            {apiKey && (
-              <p className="text-xs text-white/50">
-                Current: {maskApiKey(apiKey)}
-              </p>
-            )}
-            <p className="text-xs text-white/50">
-              Your API key is stored locally and never sent to any server except {apiProvider === "openai" ? "OpenAI" : "Google"}
-            </p>
-            <div className="mt-2 p-2 rounded-md bg-white/5 border border-white/10">
-              <p className="text-xs text-white/80 mb-1">Don't have an API key?</p>
-              {apiProvider === "openai" ? (
-                <>
-                  <p className="text-xs text-white/60 mb-1">1. Create an account at <button 
-                    onClick={() => openExternalLink('https://platform.openai.com/signup')} 
-                    className="text-blue-400 hover:underline cursor-pointer">OpenAI</button>
-                  </p>
-                  <p className="text-xs text-white/60 mb-1">2. Go to <button 
-                    onClick={() => openExternalLink('https://platform.openai.com/api-keys')} 
-                    className="text-blue-400 hover:underline cursor-pointer">API Keys</button> section
-                  </p>
-                  <p className="text-xs text-white/60">3. Create a new secret key and paste it here</p>
-                </>
-              ) : apiProvider === "gemini" ?  (
-                <>
-                  <p className="text-xs text-white/60 mb-1">1. Create an account at <button 
-                    onClick={() => openExternalLink('https://aistudio.google.com/')} 
-                    className="text-blue-400 hover:underline cursor-pointer">Google AI Studio</button>
-                  </p>
-                  <p className="text-xs text-white/60 mb-1">2. Go to the <button 
-                    onClick={() => openExternalLink('https://aistudio.google.com/app/apikey')} 
-                    className="text-blue-400 hover:underline cursor-pointer">API Keys</button> section
-                  </p>
-                  <p className="text-xs text-white/60">3. Create a new API key and paste it here</p>
-                </>
-              ) : (
-                <>
-                  <p className="text-xs text-white/60 mb-1">1. Create an account at <button 
-                    onClick={() => openExternalLink('https://console.anthropic.com/signup')} 
-                    className="text-blue-400 hover:underline cursor-pointer">Anthropic</button>
-                  </p>
-                  <p className="text-xs text-white/60 mb-1">2. Go to the <button 
-                    onClick={() => openExternalLink('https://console.anthropic.com/settings/keys')} 
-                    className="text-blue-400 hover:underline cursor-pointer">API Keys</button> section
-                  </p>
-                  <p className="text-xs text-white/60">3. Create a new API key and paste it here</p>
-                </>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-white" htmlFor="apiKey">
+                {apiProvider === "openai"
+                  ? "OpenAI API Key"
+                  : apiProvider === "gemini"
+                  ? "Gemini API Key"
+                  : "Anthropic API Key"}
+              </label>
+              <Input
+                id="apiKey"
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={
+                  apiProvider === "openai"
+                    ? "sk-..."
+                    : apiProvider === "gemini"
+                    ? "Gemini API key"
+                    : "sk-ant-..."
+                }
+                className="bg-black/50 border-white/10 text-white"
+              />
+              {apiKey && (
+                <p className="text-xs text-white/50">Current: {maskApiKey(apiKey)}</p>
               )}
             </div>
-          </div>
-          
-          <div className="space-y-2 mt-4">
-            <label className="text-sm font-medium text-white mb-2 block">Keyboard Shortcuts</label>
-            <div className="bg-black/30 border border-white/10 rounded-lg p-3">
-              <div className="grid grid-cols-2 gap-y-2 text-xs">
-                <div className="text-white/70">Toggle Visibility</div>
-                <div className="text-white/90 font-mono">Ctrl+B / Cmd+B</div>
-                
-                <div className="text-white/70">Take Screenshot</div>
-                <div className="text-white/90 font-mono">Ctrl+H / Cmd+H</div>
-                
-                <div className="text-white/70">Process Screenshots</div>
-                <div className="text-white/90 font-mono">Ctrl+Enter / Cmd+Enter</div>
-                
-                <div className="text-white/70">Delete Last Screenshot</div>
-                <div className="text-white/90 font-mono">Ctrl+L / Cmd+L</div>
-                
-                <div className="text-white/70">Reset View</div>
-                <div className="text-white/90 font-mono">Ctrl+R / Cmd+R</div>
-                
-                <div className="text-white/70">Quit Application</div>
-                <div className="text-white/90 font-mono">Ctrl+Q / Cmd+Q</div>
-                
-                <div className="text-white/70">Move Window</div>
-                <div className="text-white/90 font-mono">Ctrl+Arrow Keys</div>
-                
-                <div className="text-white/70">Decrease Opacity</div>
-                <div className="text-white/90 font-mono">Ctrl+[ / Cmd+[</div>
-                
-                <div className="text-white/70">Increase Opacity</div>
-                <div className="text-white/90 font-mono">Ctrl+] / Cmd+]</div>
-                
-                <div className="text-white/70">Zoom Out</div>
-                <div className="text-white/90 font-mono">Ctrl+- / Cmd+-</div>
-                
-                <div className="text-white/70">Reset Zoom</div>
-                <div className="text-white/90 font-mono">Ctrl+0 / Cmd+0</div>
-                
-                <div className="text-white/70">Zoom In</div>
-                <div className="text-white/90 font-mono">Ctrl+= / Cmd+=</div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-white mb-2 block">
+                Keyboard Shortcuts
+              </label>
+              <div className="bg-black/30 border border-white/10 rounded-lg p-3">
+                <div className="grid grid-cols-2 gap-y-2 text-xs">
+                  <div className="text-white/70">창 표시/숨김</div>
+                  <div className="text-white/90 font-mono">Cmd+B</div>
+                  <div className="text-white/70">스크린샷</div>
+                  <div className="text-white/90 font-mono">Cmd+H</div>
+                  <div className="text-white/70">Agent 실행</div>
+                  <div className="text-white/90 font-mono">Cmd+Enter</div>
+                  <div className="text-white/70">초기화</div>
+                  <div className="text-white/90 font-mono">Cmd+R</div>
+                </div>
               </div>
             </div>
-          </div>
-          
-          <div className="space-y-4 mt-4">
-            <label className="text-sm font-medium text-white">AI Model Selection</label>
-            <p className="text-xs text-white/60 -mt-3 mb-2">
-              Select which models to use for each stage of the process
-            </p>
-            
-            {modelCategories.map((category) => {
-              // Get the appropriate model list based on selected provider
-              const models = 
-                apiProvider === "openai" ? category.openaiModels : 
-                apiProvider === "gemini" ? category.geminiModels :
-                category.anthropicModels;
-              
-              return (
-                <div key={category.key} className="mb-4">
-                  <label className="text-sm font-medium text-white mb-1 block">
-                    {category.title}
-                  </label>
-                  <p className="text-xs text-white/60 mb-2">{category.description}</p>
-                  
-                  <div className="space-y-2">
-                    {models.map((m) => {
-                      // Determine which state to use based on category key
-                      const currentValue = 
-                        category.key === 'extractionModel' ? extractionModel :
-                        category.key === 'solutionModel' ? solutionModel :
-                        debuggingModel;
-                      
-                      // Determine which setter function to use
-                      const setValue = 
-                        category.key === 'extractionModel' ? setExtractionModel :
-                        category.key === 'solutionModel' ? setSolutionModel :
-                        setDebuggingModel;
-                        
-                      return (
-                        <div
+
+            <div className="space-y-4">
+              <label className="text-sm font-medium text-white">AI Model Selection</label>
+              {modelCategories.map((category) => {
+                const models = modelsForProvider(apiProvider);
+                const currentValue =
+                  category.key === "extractionModel"
+                    ? extractionModel
+                    : category.key === "solutionModel"
+                    ? solutionModel
+                    : debuggingModel;
+                const setValue =
+                  category.key === "extractionModel"
+                    ? setExtractionModel
+                    : category.key === "solutionModel"
+                    ? setSolutionModel
+                    : setDebuggingModel;
+
+                return (
+                  <div key={category.key} className="mb-4">
+                    <label className="text-sm font-medium text-white mb-1 block">
+                      {category.title}
+                    </label>
+                    <p className="text-xs text-white/60 mb-2">{category.description}</p>
+                    <div className="space-y-2">
+                      {models.map((m) => (
+                        <button
                           key={m.id}
-                          className={`p-2 rounded-lg cursor-pointer transition-colors ${
+                          type="button"
+                          onClick={() => setValue(m.id)}
+                          className={`w-full p-2 rounded-lg text-left transition-colors ${
                             currentValue === m.id
                               ? "bg-white/10 border border-white/20"
                               : "bg-black/30 border border-white/5 hover:bg-white/5"
                           }`}
-                          onClick={() => setValue(m.id)}
                         >
-                          <div className="flex items-center gap-2">
-                            <div
-                              className={`w-3 h-3 rounded-full ${
-                                currentValue === m.id ? "bg-white" : "bg-white/20"
-                              }`}
-                            />
-                            <div>
-                              <p className="font-medium text-white text-xs">{m.name}</p>
-                              <p className="text-xs text-white/60">{m.description}</p>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                          <p className="font-medium text-white text-xs">{m.name}</p>
+                          <p className="text-xs text-white/60">{m.description}</p>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
 
-          <div className="space-y-3 pt-2 border-t border-white/10">
-            <label className="text-sm font-medium text-white">G-portal (POC)</label>
-            <p className="text-xs text-white/50">
-              비밀번호는 <code className="text-white/70">GPORTAL_PASSWORD</code>로 .env에만 설정하세요.
-            </p>
-            <Input
-              placeholder="G-portal URL (GPORTAL_URL)"
-              value={gportalUrl}
-              onChange={(e) => setGportalUrl(e.target.value)}
-              disabled={envLocksGportal}
-              className="bg-black/50 border-white/10 text-white disabled:opacity-50"
-            />
-            <Input
-              placeholder="시스템 계정 ID (GPORTAL_USERNAME)"
-              value={gportalUsername}
-              onChange={(e) => setGportalUsername(e.target.value)}
-              disabled={envLocksGportal}
-              className="bg-black/50 border-white/10 text-white disabled:opacity-50"
-            />
-            <div className="space-y-1">
-              <label className="text-xs text-white/70">글꼴 크기 ({fontScale.toFixed(1)}x)</label>
-              <input
-                type="range"
-                min="0.8"
-                max="1.5"
-                step="0.1"
-                value={fontScale}
-                onChange={(e) => setFontScale(parseFloat(e.target.value))}
-                className="w-full"
+            <div className="space-y-3 pt-2 border-t border-white/10">
+              <label className="text-sm font-medium text-white">G-portal (POC)</label>
+              <Input
+                placeholder="G-portal URL (GPORTAL_URL)"
+                value={gportalUrl}
+                onChange={(e) => setGportalUrl(e.target.value)}
+                className="bg-black/50 border-white/10 text-white"
+              />
+              <Input
+                placeholder="시스템 계정 ID (GPORTAL_USERNAME)"
+                value={gportalUsername}
+                onChange={(e) => setGportalUsername(e.target.value)}
+                className="bg-black/50 border-white/10 text-white"
               />
             </div>
           </div>
         </div>
-        <DialogFooter className="flex justify-between sm:justify-between">
+
+        <footer className="settings-panel-footer">
           <Button
             variant="outline"
             onClick={() => handleOpenChange(false)}
@@ -642,8 +346,8 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
           >
             {isLoading ? "저장 중..." : "저장"}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </footer>
+      </div>
+    </div>
   );
 }

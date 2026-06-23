@@ -33,7 +33,10 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
 
   useEffect(() => {
     const cleanupFunctions = [
-      window.electronAPI.onSolutionStart(() => setView("solutions")),
+      window.electronAPI.onSolutionSuccess((data: unknown) => {
+        queryClient.setQueryData(["task_result"], data)
+        setView("solutions")
+      }),
       window.electronAPI.onUnauthorized(() => {
         queryClient.removeQueries({ queryKey: ["screenshots"] })
         queryClient.removeQueries({ queryKey: ["solution"] })
@@ -55,6 +58,7 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
       }),
       window.electronAPI.onSolutionError((error: string) => {
         showToast("오류", error, "error")
+        setView("queue")
       })
     ]
     return () => cleanupFunctions.forEach((fn) => fn())

@@ -8,16 +8,18 @@ import { ShortcutsHelper } from "./shortcuts"
 import { initAutoUpdater } from "./autoUpdater"
 import { configHelper } from "./ConfigHelper"
 import { harnessLoader } from "./harness/HarnessLoader"
-import * as dotenv from "dotenv"
+import { loadEnvVariables } from "./envFileStore"
 
 // Constants
 const isDev = process.env.NODE_ENV === "development"
 
 // InnoMate: 최소 창 크기 (콘텐츠 기반 리사이즈 시 너무 작아지지 않도록)
-const MIN_WINDOW_WIDTH = 320
-const MIN_WINDOW_HEIGHT = 72
-const DEFAULT_WINDOW_WIDTH = 440
-const DEFAULT_WINDOW_HEIGHT = 280
+const MIN_WINDOW_WIDTH = 400
+const MIN_WINDOW_HEIGHT = 280
+const DEFAULT_WINDOW_WIDTH = 480
+const DEFAULT_WINDOW_HEIGHT = 320
+const SETTINGS_MIN_WIDTH = 480
+const SETTINGS_MIN_HEIGHT = 680
 
 // Application State
 const state = {
@@ -30,6 +32,8 @@ const state = {
   step: 0,
   currentX: 0,
   currentY: 0,
+  windowLayoutMode: "compact" as "compact" | "settings",
+  compactWindowSize: null as { width: number; height: number } | null,
 
   // Application helpers
   screenshotHelper: null as ScreenshotHelper | null,
@@ -96,6 +100,11 @@ export interface IShortcutsHelperDeps {
 export interface IIpcHandlerDeps {
   getMainWindow: () => BrowserWindow | null
   setWindowDimensions: (width: number, height: number) => void
+  setWindowLayoutMode: (
+    mode: "compact" | "settings",
+    dimensions?: { width: number; height: number }
+  ) => void
+  getWindowLayoutMode: () => "compact" | "settings"
   getScreenshotQueue: () => string[]
   getExtraScreenshotQueue: () => string[]
   deleteScreenshot: (
@@ -468,13 +477,14 @@ function moveWindowVertical(updateFn: (y: number) => number): void {
 
 // Window dimension functions
 function setWindowDimensions(width: number, height: number): void {
+  if (state.windowLayoutMode === "settings") return
   if (!state.mainWindow?.isDestroyed()) {
     const [currentX, currentY] = state.mainWindow.getPosition()
     const primaryDisplay = screen.getPrimaryDisplay()
     const workArea = primaryDisplay.workAreaSize
     const maxWidth = Math.floor(workArea.width * 0.9)
-    const safeWidth = Math.max(MIN_WINDOW_WIDTH, Math.min(width + 16, maxWidth))
-    const safeHeight = Math.max(MIN_WINDOW_HEIGHT, Math.ceil(height + 8))
+    const safeWidth = Math.max(MIN_WINDOW_WIDTH, Math.min(Math.ceil(width) + 24, maxWidth))
+    const safeHeight = Math.max(MIN_WINDOW_HEIGHT, Math.ceil(height) + 16)
     const maxX = Math.max(0, workArea.width - safeWidth)
 
     state.mainWindow.setBounds({
@@ -484,29 +494,70 @@ function setWindowDimensions(width: number, height: number): void {
       height: safeHeight
     })
     state.windowSize = { width: safeWidth, height: safeHeight }
+    state.currentX = state.mainWindow.getBounds().x
   }
 }
 
-// Environment setup — load .env before reading config
-function loadEnvVariables(userDataPath?: string) {
-  const paths: string[] = []
-
-  if (isDev) {
-    paths.push(path.join(process.cwd(), ".env"))
-  }
-  if (userDataPath) {
-    paths.push(path.join(userDataPath, ".env"))
-  }
-  if (!isDev) {
-    paths.push(path.join(process.resourcesPath, ".env"))
+function setWindowLayoutMode(
+  mode: "compact" | "settings",
+  dimensions?: { width: number; height: number }
+): void {
+  if (!state.mainWindow || state.mainWindow.isDestroyed()) {
+    state.windowLayoutMode = mode
+    return
   }
 
-  for (const envPath of paths) {
-    if (fs.existsSync(envPath)) {
-      console.log("Loading env from:", envPath)
-      dotenv.config({ path: envPath, override: true })
+  const workArea = screen.getPrimaryDisplay().workAreaSize
+  const [currentX, currentY] = state.mainWindow.getPosition()
+
+  if (mode === "settings") {
+    if (state.windowLayoutMode !== "settings") {
+      const bounds = state.mainWindow.getBounds()
+      state.compactWindowSize = { width: bounds.width, height: bounds.height }
     }
+
+    state.windowLayoutMode = "settings"
+
+    const width = Math.min(
+      Math.max(dimensions?.width ?? SETTINGS_MIN_WIDTH, SETTINGS_MIN_WIDTH),
+      Math.floor(workArea.width * 0.92)
+    )
+    const height = Math.min(
+      Math.max(dimensions?.height ?? SETTINGS_MIN_HEIGHT, SETTINGS_MIN_HEIGHT),
+      Math.floor(workArea.height * 0.92)
+    )
+    const maxX = Math.max(0, workArea.width - width)
+
+    state.mainWindow.setBounds({
+      x: Math.min(Math.max(0, currentX), maxX),
+      y: currentY,
+      width,
+      height
+    })
+    state.windowSize = { width, height }
+    state.currentX = state.mainWindow.getBounds().x
+    return
   }
+
+  state.windowLayoutMode = "compact"
+
+  if (state.compactWindowSize) {
+    const { width, height } = state.compactWindowSize
+    const maxX = Math.max(0, workArea.width - width)
+    state.mainWindow.setBounds({
+      x: Math.min(Math.max(0, currentX), maxX),
+      y: currentY,
+      width,
+      height
+    })
+    state.windowSize = { width, height }
+    state.currentX = state.mainWindow.getBounds().x
+    state.compactWindowSize = null
+  }
+}
+
+function getWindowLayoutMode(): "compact" | "settings" {
+  return state.windowLayoutMode
 }
 
 // Initialize application
@@ -544,6 +595,8 @@ async function initializeApp() {
     initializeIpcHandlers({
       getMainWindow,
       setWindowDimensions,
+      setWindowLayoutMode,
+      getWindowLayoutMode,
       getScreenshotQueue,
       getExtraScreenshotQueue,
       deleteScreenshot,
@@ -685,6 +738,8 @@ export {
   showMainWindow,
   toggleMainWindow,
   setWindowDimensions,
+  setWindowLayoutMode,
+  getWindowLayoutMode,
   moveWindowHorizontal,
   moveWindowVertical,
   getMainWindow,

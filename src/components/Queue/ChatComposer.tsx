@@ -44,7 +44,11 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
-      onSubmit()
+      if (isRunning) return
+      void (async () => {
+        await window.electronAPI.setUserPrompt(value.trim() || undefined)
+        onSubmit()
+      })()
     }
   }
 

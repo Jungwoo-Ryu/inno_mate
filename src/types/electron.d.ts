@@ -10,6 +10,11 @@ export interface ElectronAPI {
     width: number
     height: number
   }) => Promise<void>
+  setWindowLayoutMode: (
+    mode: "compact" | "settings",
+    dimensions?: { width: number; height: number }
+  ) => Promise<{ success: boolean; mode: "compact" | "settings" }>
+  getWindowLayoutMode: () => Promise<"compact" | "settings">
   clearStore: () => Promise<{ success: boolean; error?: string }>
   getScreenshots: () => Promise<{
     success: boolean
