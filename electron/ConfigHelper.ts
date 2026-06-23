@@ -3,28 +3,43 @@ import fs from "node:fs"
 import path from "node:path"
 import { app } from "electron"
 import { EventEmitter } from "events"
+import { readEnvOverrides, hasEnvApiKey, getEnvSourceLabels } from "./envConfig"
 import { OpenAI } from "openai"
 
 interface Config {
   apiKey: string;
-  apiProvider: "openai" | "gemini" | "anthropic";  // Added provider selection
+  apiProvider: "openai" | "gemini" | "anthropic";
   extractionModel: string;
   solutionModel: string;
   debuggingModel: string;
   language: string;
   opacity: number;
+  gportalUrl: string;
+  gportalUsername: string;
+  agentModel: string;
+  fontScale: number;
+}
+
+/** Runtime config including secrets from .env (password is never written to config.json) */
+export interface RuntimeConfig extends Config {
+  gportalPassword: string;
+  envSources: string[];
 }
 
 export class ConfigHelper extends EventEmitter {
   private configPath: string;
   private defaultConfig: Config = {
     apiKey: "",
-    apiProvider: "gemini", // Default to Gemini
-    extractionModel: "gemini-2.0-flash", // Default to Flash for faster responses
-    solutionModel: "gemini-2.0-flash",
-    debuggingModel: "gemini-2.0-flash",
+    apiProvider: "openai",
+    extractionModel: "gpt-4o",
+    solutionModel: "gpt-4o",
+    debuggingModel: "gpt-4o",
     language: "python",
-    opacity: 1.0
+    opacity: 1.0,
+    gportalUrl: "",
+    gportalUsername: "",
+    agentModel: "gpt-4o",
+    fontScale: 1.0
   };
 
   constructor() {
@@ -88,18 +103,39 @@ export class ConfigHelper extends EventEmitter {
     return model;
   }
 
-  public loadConfig(): Config {
+  private applyEnvOverrides(config: Config): RuntimeConfig {
+    const env = readEnvOverrides()
+    const merged: RuntimeConfig = {
+      ...config,
+      gportalPassword: env.gportalPassword ?? "",
+      envSources: getEnvSourceLabels()
+    }
+
+    if (env.apiKey) merged.apiKey = env.apiKey
+    if (env.gportalUrl) merged.gportalUrl = env.gportalUrl
+    if (env.gportalUsername) merged.gportalUsername = env.gportalUsername
+    if (env.gportalPassword) merged.gportalPassword = env.gportalPassword
+    if (env.agentModel) {
+      merged.agentModel = env.agentModel
+      merged.solutionModel = env.agentModel
+      merged.extractionModel = env.agentModel
+    }
+
+    return merged
+  }
+
+  public loadConfig(): RuntimeConfig {
     try {
+      let base: Config = { ...this.defaultConfig }
+
       if (fs.existsSync(this.configPath)) {
-        const configData = fs.readFileSync(this.configPath, 'utf8');
+        const configData = fs.readFileSync(this.configPath, "utf8");
         const config = JSON.parse(configData);
         
-        // Ensure apiProvider is a valid value
         if (config.apiProvider !== "openai" && config.apiProvider !== "gemini"  && config.apiProvider !== "anthropic") {
-          config.apiProvider = "gemini"; // Default to Gemini if invalid
+          config.apiProvider = "openai";
         }
         
-        // Sanitize model selections to ensure only allowed models are used
         if (config.extractionModel) {
           config.extractionModel = this.sanitizeModelSelection(config.extractionModel, config.apiProvider);
         }
@@ -110,19 +146,24 @@ export class ConfigHelper extends EventEmitter {
           config.debuggingModel = this.sanitizeModelSelection(config.debuggingModel, config.apiProvider);
         }
         
-        return {
-          ...this.defaultConfig,
-          ...config
-        };
+        base = { ...this.defaultConfig, ...config };
+      } else {
+        this.saveConfig(this.defaultConfig);
       }
-      
-      // If no config exists, create a default one
-      this.saveConfig(this.defaultConfig);
-      return this.defaultConfig;
+
+      return this.applyEnvOverrides(base);
     } catch (err) {
       console.error("Error loading config:", err);
-      return this.defaultConfig;
+      return this.applyEnvOverrides(this.defaultConfig);
     }
+  }
+
+  private readConfigFromFile(): Config {
+    if (!fs.existsSync(this.configPath)) {
+      return { ...this.defaultConfig }
+    }
+    const config = JSON.parse(fs.readFileSync(this.configPath, "utf8"))
+    return { ...this.defaultConfig, ...config }
   }
 
   /**
@@ -145,9 +186,9 @@ export class ConfigHelper extends EventEmitter {
   /**
    * Update specific configuration values
    */
-  public updateConfig(updates: Partial<Config>): Config {
+  public updateConfig(updates: Partial<Config>): RuntimeConfig {
     try {
-      const currentConfig = this.loadConfig();
+      const currentConfig = this.readConfigFromFile();
       let provider = updates.apiProvider || currentConfig.apiProvider;
       
       // Auto-detect provider based on API key format if a new key is provided
@@ -198,26 +239,32 @@ export class ConfigHelper extends EventEmitter {
       
       const newConfig = { ...currentConfig, ...updates };
       this.saveConfig(newConfig);
+
+      const runtime = this.applyEnvOverrides(newConfig);
       
-      // Only emit update event for changes other than opacity
-      // This prevents re-initializing the AI client when only opacity changes
       if (updates.apiKey !== undefined || updates.apiProvider !== undefined || 
           updates.extractionModel !== undefined || updates.solutionModel !== undefined || 
-          updates.debuggingModel !== undefined || updates.language !== undefined) {
-        this.emit('config-updated', newConfig);
+          updates.debuggingModel !== undefined || updates.language !== undefined ||
+          updates.gportalUrl !== undefined || updates.gportalUsername !== undefined) {
+        this.emit('config-updated', runtime);
       }
       
-      return newConfig;
+      return runtime;
     } catch (error) {
       console.error('Error updating config:', error);
-      return this.defaultConfig;
+      return this.applyEnvOverrides(this.defaultConfig);
     }
+  }
+
+  public getGportalPassword(): string {
+    return readEnvOverrides().gportalPassword ?? ""
   }
 
   /**
    * Check if the API key is configured
    */
   public hasApiKey(): boolean {
+    if (hasEnvApiKey()) return true
     const config = this.loadConfig();
     return !!config.apiKey && config.apiKey.trim().length > 0;
   }

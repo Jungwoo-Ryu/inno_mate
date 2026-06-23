@@ -1,10 +1,10 @@
 {
-  "name": "interview-coder-v1",
-  "version": "1.0.19",
+  "name": "innomate",
+  "version": "1.0.0",
   "main": "./dist-electron/main.js",
   "scripts": {
     "clean": "npx rimraf dist dist-electron",
-    "dev": "cross-env NODE_ENV=development npm run clean && concurrently \"tsc -w -p tsconfig.electron.json\" \"vite\" \"wait-on -t 30000 http://localhost:54321 && electron ./dist-electron/main.js\"",
+    "dev": "cross-env NODE_ENV=development npm run clean && concurrently \"tsc -w --noEmit -p tsconfig.electron.json\" \"vite\"",
     "test": "echo \"No tests defined. Please contribute if you like\" && exit 0",
     "lint": "npx eslint .",
     "start": "cross-env NODE_ENV=development concurrently \"tsc -p tsconfig.electron.json\" \"vite\" \"wait-on -t 30000 http://localhost:54321 && electron ./dist-electron/main.js\"",
@@ -15,13 +15,26 @@
     "package-win": "npm run build && electron-builder build --win"
   },
   "build": {
-    "appId": "com.chunginlee.interviewcoder",
-    "productName": "Interview Coder",
+    "appId": "com.lginnotek.innomate",
+    "productName": "InnoMate",
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
       "package.json",
-      "electron/**/*"
+      "electron/**/*",
+      "agents/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "agents",
+        "to": "agents",
+        "filter": ["**/*"]
+      },
+      {
+        "from": ".env",
+        "to": ".env",
+        "filter": ["**/*"]
+      }
     ],
     "directories": {
       "output": "release",
@@ -48,7 +61,7 @@
           ]
         }
       ],
-      "artifactName": "Interview-Coder-${arch}.${ext}",
+      "artifactName": "InnoMate-${arch}.${ext}",
       "icon": "assets/icons/mac/icon.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
@@ -57,9 +70,9 @@
       "identity": "Developer ID Application",
       "notarize": true,
       "protocols": {
-        "name": "interview-coder-protocol",
+        "name": "innomate-protocol",
         "schemes": [
-          "interview-coder"
+          "innomate"
         ]
       }
     },
@@ -70,9 +83,9 @@
       "icon": "assets/icons/win/icon.ico",
       "artifactName": "${productName}-Windows-${version}.${ext}",
       "protocols": {
-        "name": "interview-coder-protocol",
+        "name": "innomate-protocol",
         "schemes": [
-          "interview-coder"
+          "innomate"
         ]
       }
     },
@@ -83,28 +96,19 @@
       "icon": "assets/icons/png/icon-256x256.png",
       "artifactName": "${productName}-Linux-${version}.${ext}",
       "protocols": {
-        "name": "interview-coder-protocol",
+        "name": "innomate-protocol",
         "schemes": [
-          "interview-coder"
+          "innomate"
         ]
       }
     },
     "publish": [
       {
         "provider": "github",
-        "owner": "ibttf",
-        "repo": "interview-coder",
+        "owner": "lginnotek",
+        "repo": "innomate",
         "private": false,
         "releaseType": "release"
-      }
-    ],
-    "extraResources": [
-      {
-        "from": ".env",
-        "to": ".env",
-        "filter": [
-          "**/*"
-        ]
       }
     ],
     "extraMetadata": {
@@ -112,15 +116,15 @@
     }
   },
   "keywords": [
-    "interview",
-    "coding",
-    "interview prep",
-    "technical interview",
-    "tool"
+    "innomate",
+    "g-portal",
+    "ai-agent",
+    "lg-innotek",
+    "automation"
   ],
-  "author": "Interview Coder Contributors",
+  "author": "LG Innotek",
   "license": "AGPL-3.0-or-later",
-  "description": "An invisible desktop application to help you pass your technical interviews.",
+  "description": "InnoMate — G-portal AI Super Agent for in-house business automation.",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@electron/notarize": "^2.3.0",

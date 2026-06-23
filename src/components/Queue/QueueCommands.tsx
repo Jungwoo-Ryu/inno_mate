@@ -93,7 +93,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         apiKey: '',
       });
       
-      showToast('Success', 'Logged out successfully', 'success');
+      showToast('완료', '로그아웃되었습니다', 'success');
       
       // Reload the app after a short delay
       setTimeout(() => {
@@ -101,7 +101,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       }, 1500);
     } catch (err) {
       console.error("Error logging out:", err);
-      showToast('Error', 'Failed to log out', 'error');
+      showToast('오류', '로그아웃에 실패했습니다', 'error');
     }
   }
 
@@ -125,7 +125,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                 const result = await window.electronAPI.triggerScreenshot()
                 if (!result.success) {
                   console.error("Failed to take screenshot:", result.error)
-                  showToast("Error", "Failed to take screenshot", "error")
+                    showToast("오류", "스크린샷 촬영에 실패했습니다", "error")
                 }
               } catch (error) {
                 console.error("Error taking screenshot:", error)
@@ -135,16 +135,10 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           >
             <span className="text-[11px] leading-none truncate">
               {screenshotCount === 0
-                ? "Take first screenshot"
+                ? "스크린샷 촬영"
                 : screenshotCount === 1
-                ? "Take second screenshot"
-                : screenshotCount === 2
-                ? "Take third screenshot"
-                : screenshotCount === 3
-                ? "Take fourth screenshot"
-                : screenshotCount === 4
-                ? "Take fifth screenshot"
-                : "Next will replace first screenshot"}
+                ? "추가 스크린샷"
+                : `${screenshotCount}장 캡처됨`}
             </span>
             <div className="flex gap-1">
               <button className="bg-white/10 rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
@@ -172,7 +166,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                       "Failed to process screenshots:",
                       result.error
                     )
-                    showToast("Error", "Failed to process screenshots", "error")
+                    showToast("오류", "Agent 실행에 실패했습니다", "error")
                   }
                 } catch (error) {
                   console.error("Error processing screenshots:", error)
@@ -181,7 +175,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
               }}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[11px] leading-none">Solve </span>
+                <span className="text-[11px] leading-none">Agent 실행</span>
                 <div className="flex gap-1 ml-2">
                   <button className="bg-white/10 rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
                     {COMMAND_KEY}
@@ -231,7 +225,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                 <div className="absolute -top-2 right-0 w-full h-2" />
                 <div className="p-3 text-xs bg-black/80 backdrop-blur-md rounded-lg border border-white/10 text-white/90 shadow-lg">
                   <div className="space-y-4">
-                    <h3 className="font-medium truncate">Keyboard Shortcuts</h3>
+                    <h3 className="font-medium truncate">단축키</h3>
                     <div className="space-y-3">
                       {/* Toggle Command */}
                       <div

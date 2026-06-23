@@ -11,19 +11,18 @@ interface ScreenshotQueueProps {
   screenshots: Screenshot[]
   onDeleteScreenshot: (index: number) => void
 }
+
 const ScreenshotQueue: React.FC<ScreenshotQueueProps> = ({
   isLoading,
   screenshots,
   onDeleteScreenshot
 }) => {
-  if (screenshots.length === 0) {
-    return <></>
-  }
+  if (screenshots.length === 0) return null
 
   const displayScreenshots = screenshots.slice(0, 5)
 
   return (
-    <div className="flex gap-4">
+    <div className="flex flex-wrap items-center justify-center gap-2 w-[clamp(300px,92vw,400px)] mx-auto">
       {displayScreenshots.map((screenshot, index) => (
         <ScreenshotItem
           key={screenshot.path}

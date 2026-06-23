@@ -4,6 +4,14 @@ import { ipcMain, shell, dialog } from "electron"
 import { randomBytes } from "crypto"
 import { IIpcHandlerDeps } from "./main"
 import { configHelper } from "./ConfigHelper"
+import { harnessLoader } from "./harness/HarnessLoader"
+import { getAttachmentMeta } from "./attachments"
+import {
+  getMcpServers,
+  saveMcpServers,
+  testMcpConnection,
+  type McpServerConfig
+} from "./mcp/McpStore"
 
 export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   console.log("Initializing IPC handlers")
@@ -156,12 +164,7 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
     const mainWindow = deps.getMainWindow()
     if (mainWindow) {
       try {
-        const screenshotPath = await deps.takeScreenshot()
-        const preview = await deps.getImagePreview(screenshotPath)
-        mainWindow.webContents.send("screenshot-taken", {
-          path: screenshotPath,
-          preview
-        })
+        await deps.takeScreenshot()
         return { success: true }
       } catch (error) {
         console.error("Error triggering screenshot:", error)
@@ -173,9 +176,11 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
 
   ipcMain.handle("take-screenshot", async () => {
     try {
-      const screenshotPath = await deps.takeScreenshot()
-      const preview = await deps.getImagePreview(screenshotPath)
-      return { path: screenshotPath, preview }
+      const paths = await deps.takeScreenshot()
+      const lastPath = paths[paths.length - 1]
+      if (!lastPath) return { error: "No screenshot captured" }
+      const preview = await deps.getImagePreview(lastPath)
+      return { path: lastPath, preview }
     } catch (error) {
       console.error("Error taking screenshot:", error)
       return { error: "Failed to take screenshot" }
@@ -231,8 +236,73 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
     }
   })
 
+  ipcMain.handle("set-user-prompt", (_event, prompt?: string) => {
+    deps.processingHelper?.setUserPrompt(prompt?.trim() || undefined)
+    return { success: true }
+  })
+
+  ipcMain.handle("set-attachments", (_event, paths: string[]) => {
+    deps.processingHelper?.setAttachments(Array.isArray(paths) ? paths : [])
+    return { success: true }
+  })
+
+  ipcMain.handle("pick-attachment-files", async () => {
+    const mainWindow = deps.getMainWindow()
+    const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
+      properties: ["openFile", "multiSelections"],
+      filters: [
+        {
+          name: "Documents & Images",
+          extensions: ["pdf", "txt", "md", "csv", "json", "png", "jpg", "jpeg", "webp", "gif"]
+        }
+      ]
+    })
+    if (result.canceled || !result.filePaths.length) {
+      return { success: true, files: [] }
+    }
+    const files = result.filePaths
+      .map(getAttachmentMeta)
+      .filter((f): f is NonNullable<typeof f> => f !== null)
+    return { success: true, files }
+  })
+
+  ipcMain.handle("list-agents", () => {
+    const ids = harnessLoader.listAgentIds()
+    return ids.map((id) => {
+      const harness = harnessLoader.loadHarness(id)
+      return {
+        id,
+        version: harness?.config.version ?? "?",
+        model: harness?.config.model ?? "gpt-4o",
+        tools: harness?.config.tools ?? [],
+        delegates: harness?.config.delegates ?? []
+      }
+    })
+  })
+
+  ipcMain.handle("reload-agent", (_event, agentId: string) => {
+    const harness = harnessLoader.reloadHarness(agentId)
+    return { success: !!harness }
+  })
+
+  ipcMain.handle("open-agents-directory", () => {
+    shell.openPath(harnessLoader.getAgentsDir())
+    return { success: true }
+  })
+
+  ipcMain.handle("get-mcp-servers", () => getMcpServers())
+
+  ipcMain.handle("save-mcp-servers", (_event, servers: McpServerConfig[]) => {
+    return saveMcpServers(servers)
+  })
+
+  ipcMain.handle("test-mcp-connection", async (_event, server: McpServerConfig) => {
+    const result = await testMcpConnection(server)
+    return result
+  })
+
   // Process screenshot handlers
-  ipcMain.handle("trigger-process-screenshots", async () => {
+  ipcMain.handle("trigger-process-screenshots", async (_event, prompt?: string) => {
     try {
       // Check for API key before processing
       if (!configHelper.hasApiKey()) {
@@ -241,6 +311,10 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
           mainWindow.webContents.send(deps.PROCESSING_EVENTS.API_KEY_INVALID);
         }
         return { success: false, error: "API key required" };
+      }
+
+      if (prompt !== undefined) {
+        deps.processingHelper?.setUserPrompt(prompt?.trim() || undefined)
       }
       
       await deps.processingHelper?.processScreenshots()

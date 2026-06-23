@@ -1,73 +1,71 @@
-import React from 'react';
-import { Button } from './ui/button';
+import React, { useRef } from "react"
+import { Button } from "./ui/button"
+import { useContentDimensions } from "../hooks/useContentDimensions"
+import { COMMAND_KEY } from "../utils/platform"
 
 interface WelcomeScreenProps {
-  onOpenSettings: () => void;
+  onOpenSettings: () => void
 }
 
+const SHORTCUTS = [
+  { label: "창 표시/숨김", keys: [`${COMMAND_KEY}+B`] },
+  { label: "스크린샷", keys: [`${COMMAND_KEY}+H`] },
+  { label: "Agent 실행", keys: [`${COMMAND_KEY}+↵`] },
+  { label: "스크린샷 삭제", keys: [`${COMMAND_KEY}+L`] },
+  { label: "초기화", keys: [`${COMMAND_KEY}+R`] }
+]
+
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onOpenSettings }) => {
+  const contentRef = useRef<HTMLDivElement>(null)
+  useContentDimensions(contentRef)
+
   return (
-    <div className="bg-black min-h-screen flex flex-col items-center justify-center p-6">
-      <div className="max-w-md w-full bg-black border border-white/10 rounded-xl p-6 shadow-lg">
-        <h1 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
-          <span>Interview Coder</span>
-          <span className="text-sm font-normal px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded-md">Unlocked Edition</span>
-        </h1>
-        
-        <div className="mb-8">
-          <h2 className="text-lg font-medium text-white mb-3">Welcome to Interview Coder</h2>
-          <p className="text-white/70 text-sm mb-4">
-            This application helps you ace technical interviews by providing AI-powered
-            solutions to coding problems.
+    <div ref={contentRef} className="app-content px-4 py-4">
+      <div className="w-[clamp(300px,92vw,380px)] mx-auto rounded-[22px] border border-white/[0.12] bg-black/70 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
+        <div className="flex flex-col items-center px-5 pt-6 pb-4 text-center">
+          <img
+            src="/innomate-icon.png"
+            alt="InnoMate"
+            className="w-16 h-16 rounded-[18px] mb-3 object-cover"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
+          />
+          <h1 className="text-xl font-semibold text-white tracking-tight">
+            <span className="text-white/90">Inno</span>
+            <span className="text-red-500">Mate</span>
+          </h1>
+          <p className="text-[10px] text-white/40 tracking-[0.2em] mt-1">AI SUPER AGENT</p>
+        </div>
+
+        <div className="px-5 pb-4 text-center">
+          <p className="text-[13px] text-white/70 leading-relaxed">
+            G-portal 업무를 AI Agent가 자동 처리합니다
           </p>
-          <div className="bg-white/5 border border-white/10 rounded-lg p-4 mb-4">
-            <h3 className="text-white/90 font-medium mb-2">Global Shortcuts</h3>
-            <ul className="space-y-2">
-              <li className="flex justify-between text-sm">
-                <span className="text-white/70">Toggle Visibility</span>
-                <span className="text-white/90">Ctrl+B / Cmd+B</span>
-              </li>
-              <li className="flex justify-between text-sm">
-                <span className="text-white/70">Take Screenshot</span>
-                <span className="text-white/90">Ctrl+H / Cmd+H</span>
-              </li>
-              <li className="flex justify-between text-sm">
-                <span className="text-white/70">Delete Last Screenshot</span>
-                <span className="text-white/90">Ctrl+L / Cmd+L</span>
-              </li>
-              <li className="flex justify-between text-sm">
-                <span className="text-white/70">Process Screenshots</span>
-                <span className="text-white/90">Ctrl+Enter / Cmd+Enter</span>
-              </li>
-              <li className="flex justify-between text-sm">
-                <span className="text-white/70">Reset View</span>
-                <span className="text-white/90">Ctrl+R / Cmd+R</span>
-              </li>
-              <li className="flex justify-between text-sm">
-                <span className="text-white/70">Quit App</span>
-                <span className="text-white/90">Ctrl+Q / Cmd+Q</span>
-              </li>
-            </ul>
+        </div>
+
+        <div className="mx-4 mb-4 rounded-2xl bg-white/[0.04] border border-white/[0.06] px-4 py-3">
+          <p className="text-[11px] font-medium text-white/60 text-center mb-2">단축키</p>
+          <div className="flex flex-col gap-1.5">
+            {SHORTCUTS.map(({ label, keys }) => (
+              <div key={label} className="flex items-center justify-between text-[12px]">
+                <span className="text-white/55">{label}</span>
+                <span className="text-white/80 font-medium tabular-nums">{keys[0]}</span>
+              </div>
+            ))}
           </div>
         </div>
-        
-        <div className="bg-white/5 border border-white/10 rounded-lg p-4 mb-6">
-          <h3 className="text-white/90 font-medium mb-2">Getting Started</h3>
-          <p className="text-white/70 text-sm mb-3">
-            Before using the application, you need to configure your OpenAI API key.
-          </p>
-          <Button 
-            className="w-full px-4 py-3 bg-white text-black rounded-xl font-medium hover:bg-white/90 transition-colors flex items-center justify-center gap-2"
+
+        <div className="px-4 pb-5">
+          <Button
+            className="w-full h-11 bg-white text-black rounded-2xl font-medium hover:bg-white/90 active:scale-[0.98] transition-all"
             onClick={onOpenSettings}
           >
-            Open Settings
+            설정 열기
           </Button>
-        </div>
-        
-        <div className="text-white/40 text-xs text-center">
-          Start by taking screenshots of your coding problem (Ctrl+H / Cmd+H)
+          <p className="mt-3 text-[10px] text-white/30 text-center leading-relaxed">
+            .env 또는 설정에서 API 키를 입력하세요
+          </p>
         </div>
       </div>
     </div>
-  );
-};
+  )
+}

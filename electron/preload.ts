@@ -149,8 +149,21 @@ const electronAPI = {
   // External URL handler
   openLink: (url: string) => shell.openExternal(url),
   triggerScreenshot: () => ipcRenderer.invoke("trigger-screenshot"),
-  triggerProcessScreenshots: () =>
-    ipcRenderer.invoke("trigger-process-screenshots"),
+  setUserPrompt: (prompt?: string) =>
+    ipcRenderer.invoke("set-user-prompt", prompt),
+  setAttachments: (paths: string[]) =>
+    ipcRenderer.invoke("set-attachments", paths),
+  pickAttachmentFiles: () => ipcRenderer.invoke("pick-attachment-files"),
+  listAgents: () => ipcRenderer.invoke("list-agents"),
+  reloadAgent: (agentId: string) => ipcRenderer.invoke("reload-agent", agentId),
+  openAgentsDirectory: () => ipcRenderer.invoke("open-agents-directory"),
+  getMcpServers: () => ipcRenderer.invoke("get-mcp-servers"),
+  saveMcpServers: (servers: unknown[]) =>
+    ipcRenderer.invoke("save-mcp-servers", servers),
+  testMcpConnection: (server: unknown) =>
+    ipcRenderer.invoke("test-mcp-connection", server),
+  triggerProcessScreenshots: (prompt?: string) =>
+    ipcRenderer.invoke("trigger-process-screenshots", prompt),
   triggerReset: () => ipcRenderer.invoke("trigger-reset"),
   triggerMoveLeft: () => ipcRenderer.invoke("trigger-move-left"),
   triggerMoveRight: () => ipcRenderer.invoke("trigger-move-right"),

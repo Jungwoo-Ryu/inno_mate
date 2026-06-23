@@ -72,7 +72,7 @@ export const UpdateNotification: React.FC = () => {
           <p className="text-sm text-white/70 mb-6">
             {updateDownloaded
               ? "The update has been downloaded and will be installed when you restart the app."
-              : "A new version of Interview Coder is available. Please update to continue using the app."}
+              : "InnoMate 새 버전이 있습니다. 계속 사용하려면 업데이트해 주세요."}
           </p>
           <div className="flex justify-end gap-2">
             {updateDownloaded ? (

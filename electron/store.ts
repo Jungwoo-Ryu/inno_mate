@@ -1,7 +1,8 @@
 import Store from "electron-store"
+import type { McpServerConfig } from "./mcp/McpStore"
 
 interface StoreSchema {
-  // Empty for now, we can add other store items here later
+  mcpServers?: McpServerConfig[]
 }
 
 const store = new Store<StoreSchema>({

@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "=== Interview Coder - Invisible Edition (No Paywall) ==="
+echo "=== InnoMate — G-portal AI Super Agent ==="
 echo
 echo "IMPORTANT: This app is designed to be INVISIBLE by default!"
 echo "Use the keyboard shortcuts to control it:"
@@ -20,10 +20,10 @@ echo
 cd "$(dirname "$0")"
 
 echo "=== Step 1: Creating required directories... ==="
-mkdir -p ~/Library/Application\ Support/interview-coder-v1/temp
-mkdir -p ~/Library/Application\ Support/interview-coder-v1/cache
-mkdir -p ~/Library/Application\ Support/interview-coder-v1/screenshots
-mkdir -p ~/Library/Application\ Support/interview-coder-v1/extra_screenshots
+mkdir -p ~/Library/Application\ Support/innomate/temp
+mkdir -p ~/Library/Application\ Support/innomate/cache
+mkdir -p ~/Library/Application\ Support/innomate/screenshots
+mkdir -p ~/Library/Application\ Support/innomate/extra_screenshots
 
 echo "=== Step 2: Cleaning previous builds... ==="
 echo "Removing old build files to ensure a fresh start..."

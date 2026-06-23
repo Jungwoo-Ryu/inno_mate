@@ -33,7 +33,7 @@ export class ScreenshotHelper {
     );
     this.tempDir = path.join(
       app.getPath("temp"),
-      "interview-coder-screenshots"
+      "innomate-screenshots"
     );
 
     // Create directories if they don't exist
@@ -154,26 +154,38 @@ export class ScreenshotHelper {
     this.extraScreenshotQueue = [];
   }
 
-  private async captureScreenshot(): Promise<Buffer> {
-    try {
-      console.log("Starting screenshot capture...");
-
-      // For Windows, try multiple methods
-      if (process.platform === "win32") {
-        return await this.captureWindowsScreenshot();
+  private async captureAllDisplays(): Promise<Buffer[]> {
+    if (process.platform === "darwin") {
+      try {
+        const displays = await screenshot.listDisplays()
+        if (displays.length > 1) {
+          console.log(`Capturing ${displays.length} displays on macOS`)
+          const buffers: Buffer[] = []
+          for (const display of displays) {
+            const buffer = await screenshot({
+              screen: display.id,
+              format: "png"
+            })
+            buffers.push(buffer)
+          }
+          return buffers
+        }
+      } catch (err) {
+        console.warn("Multi-display capture failed, falling back:", err)
       }
-
-      // For macOS and Linux, use buffer directly
-      console.log("Taking screenshot on non-Windows platform");
-      const buffer = await screenshot({ format: "png" });
-      console.log(
-        `Screenshot captured successfully, size: ${buffer.length} bytes`
-      );
-      return buffer;
-    } catch (error) {
-      console.error("Error capturing screenshot:", error);
-      throw new Error(`Failed to capture screenshot: ${error.message}`);
     }
+
+    if (process.platform === "win32") {
+      return [await this.captureWindowsScreenshot()]
+    }
+
+    const buffer = await screenshot({ format: "png" })
+    return [buffer]
+  }
+
+  private async captureScreenshot(): Promise<Buffer> {
+    const buffers = await this.captureAllDisplays()
+    return buffers[0]
   }
 
   /**
@@ -290,82 +302,67 @@ export class ScreenshotHelper {
   public async takeScreenshot(
     hideMainWindow: () => void,
     showMainWindow: () => void
-  ): Promise<string> {
+  ): Promise<string[]> {
     console.log("Taking screenshot in view:", this.view);
     hideMainWindow();
 
-    // Increased delay for window hiding on Windows
     const hideDelay = process.platform === "win32" ? 500 : 300;
     await new Promise((resolve) => setTimeout(resolve, hideDelay));
 
-    let screenshotPath = "";
+    const savedPaths: string[] = [];
     try {
-      // Get screenshot buffer using cross-platform method
-      const screenshotBuffer = await this.captureScreenshot();
+      const screenshotBuffers = await this.captureAllDisplays();
 
-      if (!screenshotBuffer || screenshotBuffer.length === 0) {
-        throw new Error("Screenshot capture returned empty buffer");
+      for (const screenshotBuffer of screenshotBuffers) {
+        if (!screenshotBuffer || screenshotBuffer.length === 0) {
+          continue;
+        }
+
+        let screenshotPath = "";
+        if (this.view === "queue") {
+          screenshotPath = path.join(this.screenshotDir, `${uuidv4()}.png`);
+          await fs.promises.writeFile(screenshotPath, screenshotBuffer);
+          this.screenshotQueue.push(screenshotPath);
+          while (this.screenshotQueue.length > this.MAX_SCREENSHOTS) {
+            const removedPath = this.screenshotQueue.shift();
+            if (removedPath) {
+              try {
+                await fs.promises.unlink(removedPath);
+              } catch (error) {
+                console.error("Error removing old screenshot:", error);
+              }
+            }
+          }
+        } else {
+          screenshotPath = path.join(this.extraScreenshotDir, `${uuidv4()}.png`);
+          await fs.promises.writeFile(screenshotPath, screenshotBuffer);
+          this.extraScreenshotQueue.push(screenshotPath);
+          while (this.extraScreenshotQueue.length > this.MAX_SCREENSHOTS) {
+            const removedPath = this.extraScreenshotQueue.shift();
+            if (removedPath) {
+              try {
+                await fs.promises.unlink(removedPath);
+              } catch (error) {
+                console.error("Error removing old screenshot:", error);
+              }
+            }
+          }
+        }
+        savedPaths.push(screenshotPath);
       }
 
-      // Save and manage the screenshot based on current view
-      if (this.view === "queue") {
-        screenshotPath = path.join(this.screenshotDir, `${uuidv4()}.png`);
-        const screenshotDir = path.dirname(screenshotPath);
-        if (!fs.existsSync(screenshotDir)) {
-          fs.mkdirSync(screenshotDir, { recursive: true });
-        }
-        await fs.promises.writeFile(screenshotPath, screenshotBuffer);
-        console.log("Adding screenshot to main queue:", screenshotPath);
-        this.screenshotQueue.push(screenshotPath);
-        if (this.screenshotQueue.length > this.MAX_SCREENSHOTS) {
-          const removedPath = this.screenshotQueue.shift();
-          if (removedPath) {
-            try {
-              await fs.promises.unlink(removedPath);
-              console.log(
-                "Removed old screenshot from main queue:",
-                removedPath
-              );
-            } catch (error) {
-              console.error("Error removing old screenshot:", error);
-            }
-          }
-        }
-      } else {
-        // In solutions view, only add to extra queue
-        screenshotPath = path.join(this.extraScreenshotDir, `${uuidv4()}.png`);
-        const screenshotDir = path.dirname(screenshotPath);
-        if (!fs.existsSync(screenshotDir)) {
-          fs.mkdirSync(screenshotDir, { recursive: true });
-        }
-        await fs.promises.writeFile(screenshotPath, screenshotBuffer);
-        console.log("Adding screenshot to extra queue:", screenshotPath);
-        this.extraScreenshotQueue.push(screenshotPath);
-        if (this.extraScreenshotQueue.length > this.MAX_SCREENSHOTS) {
-          const removedPath = this.extraScreenshotQueue.shift();
-          if (removedPath) {
-            try {
-              await fs.promises.unlink(removedPath);
-              console.log(
-                "Removed old screenshot from extra queue:",
-                removedPath
-              );
-            } catch (error) {
-              console.error("Error removing old screenshot:", error);
-            }
-          }
-        }
+      if (savedPaths.length === 0) {
+        throw new Error("Screenshot capture returned empty buffer");
       }
     } catch (error) {
       console.error("Screenshot error:", error);
       throw error;
     } finally {
-      // Increased delay for showing window again
       await new Promise((resolve) => setTimeout(resolve, 200));
       showMainWindow();
     }
 
-    return screenshotPath;
+    return savedPaths;
   }
 
   public async getImagePreview(filepath: string): Promise<string> {

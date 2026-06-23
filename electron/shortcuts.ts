@@ -40,12 +40,7 @@ export class ShortcutsHelper {
       if (mainWindow) {
         console.log("Taking screenshot...")
         try {
-          const screenshotPath = await this.deps.takeScreenshot()
-          const preview = await this.deps.getImagePreview(screenshotPath)
-          mainWindow.webContents.send("screenshot-taken", {
-            path: screenshotPath,
-            preview
-          })
+          await this.deps.takeScreenshot()
         } catch (error) {
           console.error("Error capturing screenshot:", error)
         }

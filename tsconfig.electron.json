@@ -16,5 +16,8 @@
       "main": ["electron/main.ts"]
     }
   },
-  "include": ["electron/**/*"]
+  "include": ["electron/**/*"],
+  "exclude": [
+    "electron/**/*.template.ts"
+  ]
 }

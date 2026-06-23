@@ -1,0 +1,13 @@
+{
+  "id": "vacation",
+  "version": "1.0.0",
+  "guide": "GUIDE.md",
+  "tools": [
+    "gportal.ensure_session",
+    "gportal.navigate",
+    "vacation.apply"
+  ],
+  "model": "gpt-4o",
+  "classifierModel": "gpt-4o-mini",
+  "scenarios": ["scenarios/happy-path.md"]
+}

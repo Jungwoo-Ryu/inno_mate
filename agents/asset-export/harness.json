@@ -1,0 +1,13 @@
+{
+  "id": "asset-export",
+  "version": "1.0.0",
+  "guide": "GUIDE.md",
+  "tools": [
+    "gportal.ensure_session",
+    "gportal.navigate",
+    "asset-export.submit"
+  ],
+  "model": "gpt-4o",
+  "classifierModel": "gpt-4o-mini",
+  "scenarios": ["scenarios/happy-path.md"]
+}

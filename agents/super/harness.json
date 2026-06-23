@@ -1,0 +1,17 @@
+{
+  "id": "super",
+  "version": "1.0.0",
+  "guide": "GUIDE.md",
+  "tools": [
+    "gportal.ensure_session",
+    "gportal.navigate",
+    "meeting-room.search",
+    "meeting-room.reserve",
+    "asset-export.submit",
+    "vacation.apply"
+  ],
+  "model": "gpt-4o",
+  "classifierModel": "gpt-4o-mini",
+  "delegates": ["meeting-room", "asset-export", "vacation"],
+  "scenarios": []
+}

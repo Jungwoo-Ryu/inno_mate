@@ -1,3 +1,5 @@
+import type { AgentSummary, AttachmentFile, McpServerConfig } from "./agents"
+
 export interface ElectronAPI {
   // Original methods
   openSubscriptionPortal: (authData: {
@@ -33,7 +35,16 @@ export interface ElectronAPI {
   openExternal: (url: string) => void
   toggleMainWindow: () => Promise<{ success: boolean; error?: string }>
   triggerScreenshot: () => Promise<{ success: boolean; error?: string }>
-  triggerProcessScreenshots: () => Promise<{ success: boolean; error?: string }>
+  setUserPrompt: (prompt?: string) => Promise<{ success: boolean }>
+  setAttachments: (paths: string[]) => Promise<{ success: boolean }>
+  pickAttachmentFiles: () => Promise<{ success: boolean; files: AttachmentFile[] }>
+  listAgents: () => Promise<AgentSummary[]>
+  reloadAgent: (agentId: string) => Promise<{ success: boolean }>
+  openAgentsDirectory: () => Promise<{ success: boolean }>
+  getMcpServers: () => Promise<McpServerConfig[]>
+  saveMcpServers: (servers: McpServerConfig[]) => Promise<McpServerConfig[]>
+  testMcpConnection: (server: McpServerConfig) => Promise<{ ok: boolean; error?: string }>
+  triggerProcessScreenshots: (prompt?: string) => Promise<{ success: boolean; error?: string }>
   triggerReset: () => Promise<{ success: boolean; error?: string }>
   triggerMoveLeft: () => Promise<{ success: boolean; error?: string }>
   triggerMoveRight: () => Promise<{ success: boolean; error?: string }>

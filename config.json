@@ -1,0 +1,13 @@
+{
+  "apiKey": "",
+  "apiProvider": "openai",
+  "extractionModel": "gpt-4o",
+  "solutionModel": "gpt-4o",
+  "debuggingModel": "gpt-4o",
+  "language": "python",
+  "opacity": 1,
+  "gportalUrl": "",
+  "gportalUsername": "",
+  "agentModel": "gpt-4o",
+  "fontScale": 1
+}

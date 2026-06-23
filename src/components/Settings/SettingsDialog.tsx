@@ -178,14 +178,18 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDialogProps) {
+  const { showToast } = useToast();
   const [open, setOpen] = useState(externalOpen || false);
+  const [isLoading, setIsLoading] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [apiProvider, setApiProvider] = useState<APIProvider>("openai");
   const [extractionModel, setExtractionModel] = useState("gpt-4o");
   const [solutionModel, setSolutionModel] = useState("gpt-4o");
   const [debuggingModel, setDebuggingModel] = useState("gpt-4o");
-  const [isLoading, setIsLoading] = useState(false);
-  const { showToast } = useToast();
+  const [gportalUrl, setGportalUrl] = useState("");
+  const [gportalUsername, setGportalUsername] = useState("");
+  const [fontScale, setFontScale] = useState(1.0);
+  const [envSources, setEnvSources] = useState<string[]>([]);
 
   // Sync with external open state
   useEffect(() => {
@@ -213,6 +217,10 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         extractionModel?: string;
         solutionModel?: string;
         debuggingModel?: string;
+        gportalUrl?: string;
+        gportalUsername?: string;
+        fontScale?: number;
+        envSources?: string[];
       }
 
       window.electronAPI
@@ -223,10 +231,14 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
           setExtractionModel(config.extractionModel || "gpt-4o");
           setSolutionModel(config.solutionModel || "gpt-4o");
           setDebuggingModel(config.debuggingModel || "gpt-4o");
+          setGportalUrl(config.gportalUrl || "");
+          setGportalUsername(config.gportalUsername || "");
+          setFontScale(config.fontScale ?? 1.0);
+          setEnvSources(config.envSources ?? []);
         })
         .catch((error: unknown) => {
           console.error("Failed to load config:", error);
-          showToast("Error", "Failed to load settings", "error");
+          showToast("오류", "설정을 불러오지 못했습니다", "error");
         })
         .finally(() => {
           setIsLoading(false);
@@ -263,10 +275,14 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         extractionModel,
         solutionModel,
         debuggingModel,
+        gportalUrl,
+        gportalUsername,
+        fontScale,
       });
       
       if (result) {
-        showToast("Success", "Settings saved successfully", "success");
+        document.documentElement.style.fontSize = `${fontScale * 100}%`;
+        showToast("완료", "설정이 저장되었습니다", "success");
         handleOpenChange(false);
         
         // Force reload the app to apply the API key
@@ -276,7 +292,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
       }
     } catch (error) {
       console.error("Failed to save settings:", error);
-      showToast("Error", "Failed to save settings", "error");
+      showToast("오류", "설정 저장에 실패했습니다", "error");
     } finally {
       setIsLoading(false);
     }
@@ -292,6 +308,12 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
   const openExternalLink = (url: string) => {
     window.electronAPI.openLink(url);
   };
+
+  const envLocksGportal = envSources.some((k) =>
+    ["GPORTAL_URL", "GPORTAL_USERNAME", "GPORTAL_PASSWORD"].includes(k)
+  );
+  const envLocksApiKey = envSources.includes("OPENAI_API_KEY");
+  const canSave = Boolean(apiKey) || envLocksApiKey;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -316,11 +338,17 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         }}
       >        
         <DialogHeader>
-          <DialogTitle>API Settings</DialogTitle>
+          <DialogTitle>InnoMate 설정</DialogTitle>
           <DialogDescription className="text-white/70">
-            Configure your API key and model preferences. You'll need your own API key to use this application.
+            OpenAI API 키와 G-portal 연결 정보를 설정하세요.
+            프로젝트 루트 <code className="text-white/90">.env</code> 파일로도 설정할 수 있으며, 환경 변수가 우선 적용됩니다.
           </DialogDescription>
         </DialogHeader>
+        {envSources.length > 0 && (
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+            .env에서 로드됨: {envSources.join(", ")}
+          </div>
+        )}
         <div className="space-y-4 py-4">
           {/* API Provider Selection */}
           <div className="space-y-2">
@@ -400,12 +428,14 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
+              disabled={envLocksApiKey}
               placeholder={
+                envLocksApiKey ? "OPENAI_API_KEY (.env)" :
                 apiProvider === "openai" ? "sk-..." : 
                 apiProvider === "gemini" ? "Enter your Gemini API key" :
                 "sk-ant-..."
               }
-              className="bg-black/50 border-white/10 text-white"
+              className="bg-black/50 border-white/10 text-white disabled:opacity-50"
             />
             {apiKey && (
               <p className="text-xs text-white/50">
@@ -563,6 +593,39 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
               );
             })}
           </div>
+
+          <div className="space-y-3 pt-2 border-t border-white/10">
+            <label className="text-sm font-medium text-white">G-portal (POC)</label>
+            <p className="text-xs text-white/50">
+              비밀번호는 <code className="text-white/70">GPORTAL_PASSWORD</code>로 .env에만 설정하세요.
+            </p>
+            <Input
+              placeholder="G-portal URL (GPORTAL_URL)"
+              value={gportalUrl}
+              onChange={(e) => setGportalUrl(e.target.value)}
+              disabled={envLocksGportal}
+              className="bg-black/50 border-white/10 text-white disabled:opacity-50"
+            />
+            <Input
+              placeholder="시스템 계정 ID (GPORTAL_USERNAME)"
+              value={gportalUsername}
+              onChange={(e) => setGportalUsername(e.target.value)}
+              disabled={envLocksGportal}
+              className="bg-black/50 border-white/10 text-white disabled:opacity-50"
+            />
+            <div className="space-y-1">
+              <label className="text-xs text-white/70">글꼴 크기 ({fontScale.toFixed(1)}x)</label>
+              <input
+                type="range"
+                min="0.8"
+                max="1.5"
+                step="0.1"
+                value={fontScale}
+                onChange={(e) => setFontScale(parseFloat(e.target.value))}
+                className="w-full"
+              />
+            </div>
+          </div>
         </div>
         <DialogFooter className="flex justify-between sm:justify-between">
           <Button
@@ -570,14 +633,14 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
             onClick={() => handleOpenChange(false)}
             className="border-white/10 hover:bg-white/5 text-white"
           >
-            Cancel
+            취소
           </Button>
           <Button
             className="px-4 py-3 bg-white text-black rounded-xl font-medium hover:bg-white/90 transition-colors"
             onClick={handleSave}
-            disabled={isLoading || !apiKey}
+            disabled={isLoading || !canSave}
           >
-            {isLoading ? "Saving..." : "Save Settings"}
+            {isLoading ? "저장 중..." : "저장"}
           </Button>
         </DialogFooter>
       </DialogContent>

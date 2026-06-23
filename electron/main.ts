@@ -2,19 +2,25 @@ import { app, BrowserWindow, screen, shell, ipcMain } from "electron"
 import path from "path"
 import fs from "fs"
 import { initializeIpcHandlers } from "./ipcHandlers"
-import { ProcessingHelper } from "./ProcessingHelper"
+import { AgentOrchestrator } from "./AgentOrchestrator"
 import { ScreenshotHelper } from "./ScreenshotHelper"
 import { ShortcutsHelper } from "./shortcuts"
 import { initAutoUpdater } from "./autoUpdater"
 import { configHelper } from "./ConfigHelper"
+import { harnessLoader } from "./harness/HarnessLoader"
 import * as dotenv from "dotenv"
 
 // Constants
 const isDev = process.env.NODE_ENV === "development"
 
+// InnoMate: 최소 창 크기 (콘텐츠 기반 리사이즈 시 너무 작아지지 않도록)
+const MIN_WINDOW_WIDTH = 320
+const MIN_WINDOW_HEIGHT = 72
+const DEFAULT_WINDOW_WIDTH = 440
+const DEFAULT_WINDOW_HEIGHT = 280
+
 // Application State
 const state = {
-  // Window management properties
   mainWindow: null as BrowserWindow | null,
   isWindowVisible: false,
   windowPosition: null as { x: number; y: number } | null,
@@ -28,7 +34,7 @@ const state = {
   // Application helpers
   screenshotHelper: null as ScreenshotHelper | null,
   shortcutsHelper: null as ShortcutsHelper | null,
-  processingHelper: null as ProcessingHelper | null,
+  processingHelper: null as AgentOrchestrator | null,
 
   // View and state management
   view: "queue" as "queue" | "solutions" | "debug",
@@ -62,7 +68,7 @@ export interface IProcessingHelperDeps {
   getScreenshotQueue: () => string[]
   getExtraScreenshotQueue: () => string[]
   clearQueues: () => void
-  takeScreenshot: () => Promise<string>
+  takeScreenshot: () => Promise<string[]>
   getImagePreview: (filepath: string) => Promise<string>
   deleteScreenshot: (
     path: string
@@ -74,9 +80,9 @@ export interface IProcessingHelperDeps {
 
 export interface IShortcutsHelperDeps {
   getMainWindow: () => BrowserWindow | null
-  takeScreenshot: () => Promise<string>
+  takeScreenshot: () => Promise<string[]>
   getImagePreview: (filepath: string) => Promise<string>
-  processingHelper: ProcessingHelper | null
+  processingHelper: AgentOrchestrator | null
   clearQueues: () => void
   setView: (view: "queue" | "solutions" | "debug") => void
   isVisible: () => boolean
@@ -96,9 +102,9 @@ export interface IIpcHandlerDeps {
     path: string
   ) => Promise<{ success: boolean; error?: string }>
   getImagePreview: (filepath: string) => Promise<string>
-  processingHelper: ProcessingHelper | null
+  processingHelper: AgentOrchestrator | null
   PROCESSING_EVENTS: typeof state.PROCESSING_EVENTS
-  takeScreenshot: () => Promise<string>
+  takeScreenshot: () => Promise<string[]>
   getView: () => "queue" | "solutions" | "debug"
   toggleMainWindow: () => void
   clearQueues: () => void
@@ -112,7 +118,7 @@ export interface IIpcHandlerDeps {
 // Initialize helpers
 function initializeHelpers() {
   state.screenshotHelper = new ScreenshotHelper(state.view)
-  state.processingHelper = new ProcessingHelper({
+  state.processingHelper = new AgentOrchestrator({
     getScreenshotHelper,
     getMainWindow,
     getView,
@@ -139,16 +145,12 @@ function initializeHelpers() {
     isVisible: () => state.isWindowVisible,
     toggleMainWindow,
     moveWindowLeft: () =>
-      moveWindowHorizontal((x) =>
-        Math.max(-(state.windowSize?.width || 0) / 2, x - state.step)
-      ),
+      moveWindowHorizontal((x) => Math.max(0, x - state.step)),
     moveWindowRight: () =>
-      moveWindowHorizontal((x) =>
-        Math.min(
-          state.screenWidth - (state.windowSize?.width || 0) / 2,
-          x + state.step
-        )
-      ),
+      moveWindowHorizontal((x) => {
+        const w = state.windowSize?.width ?? DEFAULT_WINDOW_WIDTH
+        return Math.min(state.screenWidth - w, x + state.step)
+      }),
     moveWindowUp: () => moveWindowVertical((y) => y - state.step),
     moveWindowDown: () => moveWindowVertical((y) => y + state.step)
   } as IShortcutsHelperDeps)
@@ -156,35 +158,39 @@ function initializeHelpers() {
 
 // Auth callback handler
 
-// Register the interview-coder protocol
+// Register the innomate protocol
 if (process.platform === "darwin") {
-  app.setAsDefaultProtocolClient("interview-coder")
+  app.setAsDefaultProtocolClient("innomate")
 } else {
-  app.setAsDefaultProtocolClient("interview-coder", process.execPath, [
+  app.setAsDefaultProtocolClient("innomate", process.execPath, [
     path.resolve(process.argv[1] || "")
   ])
 }
 
-// Handle the protocol. In this case, we choose to show an Error Box.
+// Handle the protocol
 if (process.defaultApp && process.argv.length >= 2) {
-  app.setAsDefaultProtocolClient("interview-coder", process.execPath, [
+  app.setAsDefaultProtocolClient("innomate", process.execPath, [
     path.resolve(process.argv[1])
   ])
 }
 
-// Force Single Instance Lock
-const gotTheLock = app.requestSingleInstanceLock()
+// Force Single Instance Lock (disabled in development for easier reloading)
+const gotTheLock = isDev || app.requestSingleInstanceLock()
 
 if (!gotTheLock) {
   app.quit()
 } else {
   app.on("second-instance", (event, commandLine) => {
-    // Someone tried to run a second instance, we should focus our window.
     if (state.mainWindow) {
       if (state.mainWindow.isMinimized()) state.mainWindow.restore()
       state.mainWindow.focus()
+    }
+  })
 
-      // Protocol handler removed - no longer using auth callbacks
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit()
+      state.mainWindow = null
     }
   })
 }
@@ -204,15 +210,18 @@ async function createWindow(): Promise<void> {
   state.screenWidth = workArea.width
   state.screenHeight = workArea.height
   state.step = 60
-  state.currentY = 50
+  const windowWidth = DEFAULT_WINDOW_WIDTH
+  const windowHeight = DEFAULT_WINDOW_HEIGHT
+  state.currentX = Math.max(0, Math.round((workArea.width - windowWidth) / 2))
+  state.currentY = Math.max(0, Math.round((workArea.height - windowHeight) / 2))
 
   const windowSettings: Electron.BrowserWindowConstructorOptions = {
-    width: 800,
-    height: 600,
-    minWidth: 750,
-    minHeight: 550,
+    width: windowWidth,
+    height: windowHeight,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     x: state.currentX,
-    y: 50,
+    y: state.currentY,
     alwaysOnTop: true,
     webPreferences: {
       nodeIntegration: false,
@@ -230,7 +239,7 @@ async function createWindow(): Promise<void> {
     opacity: 1.0,  // Start with full opacity
     backgroundColor: "#00000000",
     focusable: true,
-    skipTaskbar: true,
+    skipTaskbar: false,
     type: "panel",
     paintWhenInitiallyHidden: true,
     titleBarStyle: "hidden",
@@ -246,17 +255,10 @@ async function createWindow(): Promise<void> {
   })
   state.mainWindow.webContents.on(
     "did-fail-load",
-    async (event, errorCode, errorDescription) => {
+    (_event, errorCode, errorDescription) => {
+      // ERR_ABORTED(-3) is normal during navigation; ignore it
+      if (errorCode === -3) return
       console.error("Window failed to load:", errorCode, errorDescription)
-      if (isDev) {
-        // In development, retry loading after a short delay
-        console.log("Retrying to load development server...")
-        setTimeout(() => {
-          state.mainWindow?.loadURL("http://localhost:54321").catch((error) => {
-            console.error("Failed to load dev server on retry:", error)
-          })
-        }, 1000)
-      }
     }
   )
 
@@ -288,8 +290,8 @@ async function createWindow(): Promise<void> {
 
   // Configure window behavior
   state.mainWindow.webContents.setZoomFactor(1)
-  if (isDev) {
-    state.mainWindow.webContents.openDevTools()
+  if (isDev && process.env.INNOMATE_DEVTOOLS === "1") {
+    state.mainWindow.webContents.openDevTools({ mode: "detach" })
   }
   state.mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     console.log("Attempting to open URL:", url)
@@ -323,8 +325,8 @@ async function createWindow(): Promise<void> {
     state.mainWindow.setWindowButtonVisibility(false)
     state.mainWindow.setBackgroundColor("#00000000")
 
-    // Prevent window from being included in window switcher
-    state.mainWindow.setSkipTaskbar(true)
+    // Dock에 표시 (InnoMate)
+    state.mainWindow.setSkipTaskbar(false)
 
     // Disable window shadow
     state.mainWindow.setHasShadow(false)
@@ -352,18 +354,12 @@ async function createWindow(): Promise<void> {
   const savedOpacity = configHelper.getOpacity();
   console.log(`Initial opacity from config: ${savedOpacity}`);
   
-  // Always make sure window is shown first
-  state.mainWindow.showInactive(); // Use showInactive for consistency
-  
-  if (savedOpacity <= 0.1) {
-    console.log('Initial opacity too low, setting to 0 and hiding window');
-    state.mainWindow.setOpacity(0);
-    state.isWindowVisible = false;
-  } else {
-    console.log(`Setting initial opacity to ${savedOpacity}`);
-    state.mainWindow.setOpacity(savedOpacity);
-    state.isWindowVisible = true;
-  }
+  // 항상 첫 실행 시 창 표시 (InnoMate는 사내 도구 — 스텔스 숨김 비활성)
+  state.mainWindow.setOpacity(savedOpacity > 0.1 ? savedOpacity : 1)
+  state.mainWindow.show()
+  state.mainWindow.focus()
+  state.isWindowVisible = true
+  console.log(`Window shown at (${state.currentX}, ${state.currentY}), opacity ${savedOpacity}`)
 }
 
 function handleWindowMove(): void {
@@ -476,37 +472,48 @@ function setWindowDimensions(width: number, height: number): void {
     const [currentX, currentY] = state.mainWindow.getPosition()
     const primaryDisplay = screen.getPrimaryDisplay()
     const workArea = primaryDisplay.workAreaSize
-    const maxWidth = Math.floor(workArea.width * 0.5)
+    const maxWidth = Math.floor(workArea.width * 0.9)
+    const safeWidth = Math.max(MIN_WINDOW_WIDTH, Math.min(width + 16, maxWidth))
+    const safeHeight = Math.max(MIN_WINDOW_HEIGHT, Math.ceil(height + 8))
+    const maxX = Math.max(0, workArea.width - safeWidth)
 
     state.mainWindow.setBounds({
-      x: Math.min(currentX, workArea.width - maxWidth),
+      x: Math.min(Math.max(0, currentX), maxX),
       y: currentY,
-      width: Math.min(width + 32, maxWidth),
-      height: Math.ceil(height)
+      width: safeWidth,
+      height: safeHeight
     })
+    state.windowSize = { width: safeWidth, height: safeHeight }
   }
 }
 
-// Environment setup
-function loadEnvVariables() {
+// Environment setup — load .env before reading config
+function loadEnvVariables(userDataPath?: string) {
+  const paths: string[] = []
+
   if (isDev) {
-    console.log("Loading env variables from:", path.join(process.cwd(), ".env"))
-    dotenv.config({ path: path.join(process.cwd(), ".env") })
-  } else {
-    console.log(
-      "Loading env variables from:",
-      path.join(process.resourcesPath, ".env")
-    )
-    dotenv.config({ path: path.join(process.resourcesPath, ".env") })
+    paths.push(path.join(process.cwd(), ".env"))
   }
-  console.log("Environment variables loaded for open-source version")
+  if (userDataPath) {
+    paths.push(path.join(userDataPath, ".env"))
+  }
+  if (!isDev) {
+    paths.push(path.join(process.resourcesPath, ".env"))
+  }
+
+  for (const envPath of paths) {
+    if (fs.existsSync(envPath)) {
+      console.log("Loading env from:", envPath)
+      dotenv.config({ path: envPath, override: true })
+    }
+  }
 }
 
 // Initialize application
 async function initializeApp() {
   try {
     // Set custom cache directory to prevent permission issues
-    const appDataPath = path.join(app.getPath('appData'), 'interview-coder-v1')
+    const appDataPath = path.join(app.getPath('appData'), 'innomate')
     const sessionPath = path.join(appDataPath, 'session')
     const tempPath = path.join(appDataPath, 'temp')
     const cachePath = path.join(appDataPath, 'cache')
@@ -522,8 +529,11 @@ async function initializeApp() {
     app.setPath('sessionData', sessionPath)      
     app.setPath('temp', tempPath)
     app.setPath('cache', cachePath)
-      
-    loadEnvVariables()
+
+    // app paths 설정 완료 후 harness 초기화 (app.getPath 사용 가능 시점)
+    harnessLoader.initialize()
+
+    loadEnvVariables(appDataPath)
     
     // Ensure a configuration file exists
     if (!configHelper.hasApiKey()) {
@@ -546,16 +556,12 @@ async function initializeApp() {
       clearQueues,
       setView,
       moveWindowLeft: () =>
-        moveWindowHorizontal((x) =>
-          Math.max(-(state.windowSize?.width || 0) / 2, x - state.step)
-        ),
+        moveWindowHorizontal((x) => Math.max(0, x - state.step)),
       moveWindowRight: () =>
-        moveWindowHorizontal((x) =>
-          Math.min(
-            state.screenWidth - (state.windowSize?.width || 0) / 2,
-            x + state.step
-          )
-        ),
+        moveWindowHorizontal((x) => {
+          const w = state.windowSize?.width ?? DEFAULT_WINDOW_WIDTH
+          return Math.min(state.screenWidth - w, x + state.step)
+        }),
       moveWindowUp: () => moveWindowVertical((y) => y - state.step),
       moveWindowDown: () => moveWindowVertical((y) => y + state.step)
     })
@@ -581,30 +587,7 @@ app.on("open-url", (event, url) => {
   event.preventDefault()
 })
 
-// Handle second instance (removed auth callback handling)
-app.on("second-instance", (event, commandLine) => {
-  console.log("second-instance event received:", commandLine)
-  
-  // Focus or create the main window
-  if (!state.mainWindow) {
-    createWindow()
-  } else {
-    if (state.mainWindow.isMinimized()) state.mainWindow.restore()
-    state.mainWindow.focus()
-  }
-})
-
-// Prevent multiple instances of the app
-if (!app.requestSingleInstanceLock()) {
-  app.quit()
-} else {
-  app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-      app.quit()
-      state.mainWindow = null
-    }
-  })
-}
+// window-all-closed / second-instance는 위의 Single Instance Lock 블록에서 등록됨
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
@@ -652,14 +635,23 @@ function clearQueues(): void {
   setView("queue")
 }
 
-async function takeScreenshot(): Promise<string> {
+async function takeScreenshot(): Promise<string[]> {
   if (!state.mainWindow) throw new Error("No main window available")
-  return (
-    state.screenshotHelper?.takeScreenshot(
+  const paths =
+    (await state.screenshotHelper?.takeScreenshot(
       () => hideMainWindow(),
       () => showMainWindow()
-    ) || ""
-  )
+    )) || []
+
+  for (const screenshotPath of paths) {
+    const preview = await getImagePreview(screenshotPath)
+    state.mainWindow?.webContents.send("screenshot-taken", {
+      path: screenshotPath,
+      preview
+    })
+  }
+
+  return paths
 }
 
 async function getImagePreview(filepath: string): Promise<string> {

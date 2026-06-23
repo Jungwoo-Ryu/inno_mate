@@ -182,8 +182,8 @@ function App() {
     // Event listeners for process events
     const onApiKeyInvalid = () => {
       showToast(
-        "API Key Invalid",
-        "Your OpenAI API key appears to be invalid or has insufficient credits",
+        "API 키 오류",
+        "OpenAI API 키가 유효하지 않거나 크레딧이 부족합니다",
         "error"
       )
       setApiKeyDialogOpen(true)
@@ -194,9 +194,8 @@ function App() {
 
     // Define a no-op handler for solution success
     const unsubscribeSolutionSuccess = window.electronAPI.onSolutionSuccess(
-      () => {
-        console.log("Solution success - no credits deducted in this version")
-        // No credit deduction in this version
+      (data: unknown) => {
+        queryClient.setQueryData(["task_result"], data)
       }
     )
 
@@ -224,7 +223,7 @@ function App() {
     try {
       await window.electronAPI.updateConfig({ apiKey })
       setHasApiKey(true)
-      showToast("Success", "API key saved successfully", "success")
+      showToast("완료", "API 키가 저장되었습니다", "success")
       
       // Reload app after a short delay to reinitialize with the new API key
       setTimeout(() => {
@@ -232,7 +231,7 @@ function App() {
       }, 1500)
     } catch (error) {
       console.error("Failed to save API key:", error)
-      showToast("Error", "Failed to save API key", "error")
+      showToast("오류", "API 키 저장에 실패했습니다", "error")
     }
   }, [showToast])
 
@@ -240,7 +239,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <ToastContext.Provider value={{ showToast }}>
-          <div className="relative">
+          <div className="app-shell">
             {isInitialized ? (
               hasApiKey ? (
                 <SubscribedApp
@@ -252,12 +251,10 @@ function App() {
                 <WelcomeScreen onOpenSettings={handleOpenSettings} />
               )
             ) : (
-              <div className="min-h-screen bg-black flex items-center justify-center">
+              <div className="app-content">
                 <div className="flex flex-col items-center gap-3">
-                  <div className="w-6 h-6 border-2 border-white/20 border-t-white/80 rounded-full animate-spin"></div>
-                  <p className="text-white/60 text-sm">
-                    Initializing...
-                  </p>
+                  <div className="w-6 h-6 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
+                  <p className="text-white/50 text-sm">초기화 중...</p>
                 </div>
               </div>
             )}

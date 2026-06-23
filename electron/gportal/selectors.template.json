@@ -1,0 +1,48 @@
+{
+  "_comment": "이 파일을 selectors.json 으로 복사한 뒤 실제 G-portal DOM에 맞게 수정하세요.",
+  "_guide": "agents/_shared/GPORTAL_PLAYWRIGHT_GUIDE.md",
+
+  "login": {
+    "urlPath": "/login",
+    "usernameInput": "#username",
+    "passwordInput": "#password",
+    "submitButton": "button[type=submit]",
+    "loggedInIndicator": ".main-dashboard"
+  },
+
+  "navigation": {
+    "menuItem": "text={name}",
+    "submenuItem": "text={name}"
+  },
+
+  "meetingRoom": {
+    "dateInput": "#meeting-date",
+    "startTimeInput": "#start-time",
+    "endTimeInput": "#end-time",
+    "searchButton": "button:has-text('검색')",
+    "roomRow": "tr.room-row",
+    "reserveButton": "button:has-text('예약')",
+    "confirmButton": "button:has-text('확인')",
+    "successMessage": ".success-message"
+  },
+
+  "assetExport": {
+    "assetIdInput": "#asset-id",
+    "reasonInput": "#reason",
+    "startDateInput": "#export-start",
+    "endDateInput": "#export-end",
+    "destinationInput": "#destination",
+    "submitButton": "button:has-text('상신')",
+    "successMessage": ".approval-submitted"
+  },
+
+  "vacation": {
+    "leaveTypeSelect": "#leave-type",
+    "startDateInput": "#vacation-start",
+    "endDateInput": "#vacation-end",
+    "reasonInput": "#vacation-reason",
+    "substituteInput": "#substitute",
+    "submitButton": "button:has-text('신청')",
+    "successMessage": ".application-complete"
+  }
+}
