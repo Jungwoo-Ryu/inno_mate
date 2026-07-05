@@ -17,39 +17,42 @@ export const OPENAI_MODELS: AIModelOption[] = [
 ]
 
 export const GEMINI_MODELS: AIModelOption[] = [
-  { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", description: "최신 Flash — 에이전트·코딩 최적화" },
+  { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", description: "최신 Flash — 에이전트·업무 자동화" },
   { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro", description: "플래그십 추론 · 2M 컨텍스트" },
-  { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash-Lite", description: "고속 · 저비용 분류/추출" },
+  { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash-Lite", description: "고속 · 저비용 분류" },
   { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "균형 잡힌 속도/비용" },
   { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash-Lite", description: "대량 처리용 경량 모델" }
 ]
 
 export const ANTHROPIC_MODELS: AIModelOption[] = [
   { id: "claude-opus-4-8", name: "Claude Opus 4.8", description: "최고 성능 Opus — 복잡한 추론" },
-  { id: "claude-opus-4-7", name: "Claude Opus 4.7", description: "에이전트 코딩 · SWE-bench 최적" },
+  { id: "claude-opus-4-7", name: "Claude Opus 4.7", description: "에이전트 업무 자동화" },
   { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", description: "속도·성능 균형 (권장)" },
-  { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", description: "최고속 · 분류/추출용" },
+  { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", description: "최고속 · 분류용" },
   { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet", description: "레거시 Sonnet" }
 ]
 
 export const DEFAULT_MODELS: Record<
   APIProvider,
-  { extraction: string; solution: string; debugging: string }
+  { agent: string; classifier: string; extraction: string; solution: string }
 > = {
   openai: {
+    agent: "gpt-5.5",
+    classifier: "gpt-5.4-mini",
     extraction: "gpt-5.4-mini",
-    solution: "gpt-5.5",
-    debugging: "gpt-5.5"
+    solution: "gpt-5.5"
   },
   gemini: {
+    agent: "gemini-3.5-flash",
+    classifier: "gemini-3.1-flash-lite",
     extraction: "gemini-3.1-flash-lite",
-    solution: "gemini-3.5-flash",
-    debugging: "gemini-3.5-flash"
+    solution: "gemini-3.5-flash"
   },
   anthropic: {
+    agent: "claude-sonnet-4-6",
+    classifier: "claude-haiku-4-5",
     extraction: "claude-haiku-4-5",
-    solution: "claude-sonnet-4-6",
-    debugging: "claude-sonnet-4-6"
+    solution: "claude-sonnet-4-6"
   }
 }
 

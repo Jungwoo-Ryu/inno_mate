@@ -11,6 +11,7 @@ const SHORTCUTS = [
   { label: "창 표시/숨김", keys: [`${COMMAND_KEY}+B`] },
   { label: "스크린샷", keys: [`${COMMAND_KEY}+H`] },
   { label: "Agent 실행", keys: [`${COMMAND_KEY}+↵`] },
+  { label: "모니터 이동", keys: [`${COMMAND_KEY}+\\`] },
   { label: "스크린샷 삭제", keys: [`${COMMAND_KEY}+L`] },
   { label: "초기화", keys: [`${COMMAND_KEY}+R`] }
 ]
@@ -33,7 +34,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onOpenSettings }) 
             <span className="text-white/90">Inno</span>
             <span className="text-red-500">Mate</span>
           </h1>
-          <p className="text-[10px] text-white/40 tracking-[0.2em] mt-1">AI SUPER AGENT</p>
+          <p className="text-[10px] text-white/40 tracking-[0.2em] mt-1">LG INNOTEK · AI SUPER AGENT</p>
         </div>
 
         <div className="px-5 pb-4 text-center">

@@ -10,7 +10,6 @@ import type { AttachmentFile } from "../../types/agents"
 
 interface QueuePanelProps {
   screenshotCount: number
-  credits: number
 }
 
 function Kbd({ children }: { children: React.ReactNode }) {
@@ -55,7 +54,7 @@ function ActionTile({
   )
 }
 
-const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount, credits }) => {
+const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount }) => {
   const { showToast } = useToast()
   const [prompt, setPrompt] = useState("")
   const [attachments, setAttachments] = useState<AttachmentFile[]>([])
@@ -73,9 +72,9 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount, credits }) => 
 
   useEffect(() => {
     const cleanupFunctions = [
-      window.electronAPI.onSolutionStart(() => setIsRunning(true)),
-      window.electronAPI.onSolutionSuccess(() => setIsRunning(false)),
-      window.electronAPI.onSolutionError(() => setIsRunning(false)),
+      window.electronAPI.onAgentRunStart(() => setIsRunning(true)),
+      window.electronAPI.onAgentRunSuccess(() => setIsRunning(false)),
+      window.electronAPI.onAgentRunError(() => setIsRunning(false)),
       window.electronAPI.onProcessingNoScreenshots(() => setIsRunning(false)),
       window.electronAPI.onResetView(() => setIsRunning(false))
     ]
@@ -101,8 +100,6 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount, credits }) => 
       showToast("안내", "스크린샷, 파일, 또는 업무 내용을 입력하세요", "neutral")
       return
     }
-    if (credits <= 0) return
-
     setIsRunning(true)
     try {
       await window.electronAPI.setUserPrompt(trimmed || undefined)
@@ -138,7 +135,7 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount, credits }) => 
           <div className="absolute inset-0 z-20 flex items-center justify-center rounded-[22px] bg-black/60 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-2">
               <div className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
-              <p className="text-[11px] text-white/60">Agent 실행 중…</p>
+              <p className="text-[11px] text-white/60">OCR 텍스트 추출 중…</p>
             </div>
           </div>
         )}
@@ -180,6 +177,7 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount, credits }) => 
           {[
             { label: "실행", keys: [COMMAND_KEY, "↵"] },
             { label: "창 숨김", keys: [COMMAND_KEY, "B"] },
+            { label: "모니터", keys: [COMMAND_KEY, "\\"] },
             { label: "삭제", keys: [COMMAND_KEY, "L"] },
             { label: "초기화", keys: [COMMAND_KEY, "R"] }
           ].map(({ label, keys }) => (

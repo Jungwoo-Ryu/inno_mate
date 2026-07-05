@@ -13,13 +13,18 @@ import {
   type McpServerConfig
 } from "./mcp/McpStore"
 import { DEFAULT_MODELS } from "./aiModels"
+import { isPocOcrMode } from "./pocMode"
+import { getWebBaseUrl, syncAgentsFromWeb } from "./webRegistry"
 
 export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   console.log("Initializing IPC handlers")
 
   // Configuration handlers
   ipcMain.handle("get-config", () => {
-    return configHelper.loadConfig();
+    return {
+      ...configHelper.loadConfig(),
+      pocOcrMode: isPocOcrMode()
+    }
   })
 
   ipcMain.handle("update-config", (_event, updates) => {
@@ -27,7 +32,8 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   })
 
   ipcMain.handle("check-api-key", () => {
-    return configHelper.hasApiKey();
+    if (isPocOcrMode()) return true
+    return configHelper.hasApiKey()
   })
   
   ipcMain.handle("validate-api-key", async (_event, apiKey) => {
@@ -42,43 +48,6 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
     // Then test the API key with OpenAI
     const result = await configHelper.testApiKey(apiKey);
     return result;
-  })
-
-  // Credits handlers
-  ipcMain.handle("set-initial-credits", async (_event, credits: number) => {
-    const mainWindow = deps.getMainWindow()
-    if (!mainWindow) return
-
-    try {
-      // Set the credits in a way that ensures atomicity
-      await mainWindow.webContents.executeJavaScript(
-        `window.__CREDITS__ = ${credits}`
-      )
-      mainWindow.webContents.send("credits-updated", credits)
-    } catch (error) {
-      console.error("Error setting initial credits:", error)
-      throw error
-    }
-  })
-
-  ipcMain.handle("decrement-credits", async () => {
-    const mainWindow = deps.getMainWindow()
-    if (!mainWindow) return
-
-    try {
-      const currentCredits = await mainWindow.webContents.executeJavaScript(
-        "window.__CREDITS__"
-      )
-      if (currentCredits > 0) {
-        const newCredits = currentCredits - 1
-        await mainWindow.webContents.executeJavaScript(
-          `window.__CREDITS__ = ${newCredits}`
-        )
-        mainWindow.webContents.send("credits-updated", newCredits)
-      }
-    } catch (error) {
-      console.error("Error decrementing credits:", error)
-    }
   })
 
   // Screenshot queue handlers
@@ -100,15 +69,14 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
 
   // Screenshot processing handlers
   ipcMain.handle("process-screenshots", async () => {
-    // Check for API key before processing
-    if (!configHelper.hasApiKey()) {
-      const mainWindow = deps.getMainWindow();
+    if (!isPocOcrMode() && !configHelper.hasApiKey()) {
+      const mainWindow = deps.getMainWindow()
       if (mainWindow) {
-        mainWindow.webContents.send(deps.PROCESSING_EVENTS.API_KEY_INVALID);
+        mainWindow.webContents.send(deps.PROCESSING_EVENTS.API_KEY_INVALID)
       }
-      return;
+      return
     }
-    
+
     await deps.processingHelper?.processScreenshots()
   })
 
@@ -307,6 +275,15 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
     return { success: true }
   })
 
+  ipcMain.handle("sync-web-agents", async () => {
+    return syncAgentsFromWeb()
+  })
+
+  ipcMain.handle("open-web-portal", () => {
+    shell.openExternal(getWebBaseUrl())
+    return { success: true }
+  })
+
   ipcMain.handle("get-mcp-servers", () => getMcpServers())
 
   ipcMain.handle("save-mcp-servers", (_event, servers: McpServerConfig[]) => {
@@ -321,13 +298,12 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   // Process screenshot handlers
   ipcMain.handle("trigger-process-screenshots", async (_event, prompt?: string) => {
     try {
-      // Check for API key before processing
-      if (!configHelper.hasApiKey()) {
-        const mainWindow = deps.getMainWindow();
+      if (!isPocOcrMode() && !configHelper.hasApiKey()) {
+        const mainWindow = deps.getMainWindow()
         if (mainWindow) {
-          mainWindow.webContents.send(deps.PROCESSING_EVENTS.API_KEY_INVALID);
+          mainWindow.webContents.send(deps.PROCESSING_EVENTS.API_KEY_INVALID)
         }
-        return { success: false, error: "API key required" };
+        return { success: false, error: "API key required" }
       }
 
       if (prompt !== undefined) {

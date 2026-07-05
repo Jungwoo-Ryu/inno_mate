@@ -6,6 +6,8 @@ import { configHelper } from "./ConfigHelper"
 import { harnessRunner, isAbortError } from "./harness/HarnessRunner"
 import { harnessWatcher } from "./harness/HarnessWatcher"
 import { loadAttachments } from "./attachments"
+import { extractTextFromScreenshotPaths } from "./ocr/LocalOcr"
+import { isPocOcrMode } from "./pocMode"
 import type { AgentRunResult } from "./harness/types"
 
 const GEMINI_OPENAI_BASE_URL =
@@ -71,16 +73,6 @@ export class AgentOrchestrator {
       return
     }
 
-    const config = configHelper.loadConfig()
-
-    if (!this.openaiClient) {
-      this.initializeAIClient()
-      if (!this.openaiClient) {
-        mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.API_KEY_INVALID)
-        return
-      }
-    }
-
     const view = this.deps.getView()
     if (view !== "queue") {
       return
@@ -98,6 +90,20 @@ export class AgentOrchestrator {
     if (!existingScreenshots.length && !hasAttachments && !hasPrompt) {
       mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS)
       return
+    }
+
+    // PoC: 스크린샷이 있으면 로컬 OCR만 실행 (LLM 미사용)
+    if (isPocOcrMode() && existingScreenshots.length > 0) {
+      await this.processWithLocalOcr(existingScreenshots)
+      return
+    }
+
+    if (!this.openaiClient) {
+      this.initializeAIClient()
+      if (!this.openaiClient) {
+        mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.API_KEY_INVALID)
+        return
+      }
     }
 
     this.isProcessing = true
@@ -147,6 +153,40 @@ export class AgentOrchestrator {
       this.deps.setView("queue")
     } finally {
       this.currentAbortController = null
+      this.isProcessing = false
+    }
+  }
+
+  private async processWithLocalOcr(screenshotPaths: string[]): Promise<void> {
+    const mainWindow = this.deps.getMainWindow()
+    if (!mainWindow) return
+
+    this.isProcessing = true
+    this.pendingUserPrompt = undefined
+    this.pendingAttachmentPaths = []
+    mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
+
+    try {
+      console.log("[AgentOrchestrator] PoC local OCR mode")
+      const ocrText = await extractTextFromScreenshotPaths(screenshotPaths)
+      this.handleResult({
+        status: "success",
+        agentId: "local-ocr",
+        message_ko: ocrText,
+        data: {
+          mode: "poc-ocr",
+          screenshotCount: screenshotPaths.length
+        }
+      })
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "OCR 처리 중 오류가 발생했습니다"
+      mainWindow.webContents.send(
+        this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+        message
+      )
+      this.deps.setView("queue")
+    } finally {
       this.isProcessing = false
     }
   }

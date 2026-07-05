@@ -34,6 +34,7 @@ const state = {
   currentY: 0,
   windowLayoutMode: "compact" as "compact" | "settings",
   compactWindowSize: null as { width: number; height: number } | null,
+  wasVisibleBeforeScreenshot: true,
 
   // Application helpers
   screenshotHelper: null as ScreenshotHelper | null,
@@ -95,6 +96,7 @@ export interface IShortcutsHelperDeps {
   moveWindowRight: () => void
   moveWindowUp: () => void
   moveWindowDown: () => void
+  moveWindowToNextDisplay: () => void
 }
 
 export interface IIpcHandlerDeps {
@@ -161,7 +163,8 @@ function initializeHelpers() {
         return Math.min(state.screenWidth - w, x + state.step)
       }),
     moveWindowUp: () => moveWindowVertical((y) => y - state.step),
-    moveWindowDown: () => moveWindowVertical((y) => y + state.step)
+    moveWindowDown: () => moveWindowVertical((y) => y + state.step),
+    moveWindowToNextDisplay
   } as IShortcutsHelperDeps)
 }
 
@@ -207,6 +210,49 @@ if (!gotTheLock) {
 // Auth callback removed as we no longer use Supabase authentication
 
 // Window management functions
+
+function getVirtualWorkAreaBounds() {
+  const displays = screen.getAllDisplays()
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+
+  for (const display of displays) {
+    const area = display.workArea
+    minX = Math.min(minX, area.x)
+    minY = Math.min(minY, area.y)
+    maxX = Math.max(maxX, area.x + area.width)
+    maxY = Math.max(maxY, area.y + area.height)
+  }
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY
+  }
+}
+
+function getDisplayForWindow(): Electron.Display {
+  if (!state.mainWindow || state.mainWindow.isDestroyed()) {
+    return screen.getPrimaryDisplay()
+  }
+  const bounds = state.mainWindow.getBounds()
+  return screen.getDisplayNearestPoint({
+    x: bounds.x + bounds.width / 2,
+    y: bounds.y + bounds.height / 2
+  })
+}
+
+function refreshScreenMetrics(): void {
+  const virtual = getVirtualWorkAreaBounds()
+  state.screenWidth = virtual.width
+  state.screenHeight = virtual.height
+}
+
 async function createWindow(): Promise<void> {
   if (state.mainWindow) {
     if (state.mainWindow.isMinimized()) state.mainWindow.restore()
@@ -249,7 +295,6 @@ async function createWindow(): Promise<void> {
     backgroundColor: "#00000000",
     focusable: true,
     skipTaskbar: false,
-    type: "panel",
     paintWhenInitiallyHidden: true,
     titleBarStyle: "hidden",
     enableLargerThanScreen: true,
@@ -307,8 +352,12 @@ async function createWindow(): Promise<void> {
     try {
       const parsedURL = new URL(url);
       const hostname = parsedURL.hostname;
-      const allowedHosts = ["google.com", "supabase.co"];
-      if (allowedHosts.includes(hostname) || hostname.endsWith(".google.com") || hostname.endsWith(".supabase.co")) {
+      const allowedHosts = ["google.com", "lginnotek.com"]
+      if (
+        allowedHosts.includes(hostname) ||
+        hostname.endsWith(".google.com") ||
+        hostname.endsWith(".lginnotek.com")
+      ) {
         shell.openExternal(url);
         return { action: "deny" }; // Do not open this URL in a new Electron window
       }
@@ -319,31 +368,25 @@ async function createWindow(): Promise<void> {
     return { action: "allow" };
   })
 
-  // Enhanced screen capture resistance
-  state.mainWindow.setContentProtection(true)
+  // 데모·화면 공유 시 앱이 보이도록 캡처 보호 비활성 (스크린샷 순간에만 hide)
+  state.mainWindow.setContentProtection(false)
 
   state.mainWindow.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true
   })
   state.mainWindow.setAlwaysOnTop(true, "screen-saver", 1)
 
-  // Additional screen capture resistance settings
   if (process.platform === "darwin") {
-    // Prevent window from being captured in screenshots
-    state.mainWindow.setHiddenInMissionControl(true)
+    state.mainWindow.setHiddenInMissionControl(false)
     state.mainWindow.setWindowButtonVisibility(false)
     state.mainWindow.setBackgroundColor("#00000000")
-
-    // Dock에 표시 (InnoMate)
     state.mainWindow.setSkipTaskbar(false)
-
-    // Disable window shadow
     state.mainWindow.setHasShadow(false)
   }
-
-  // Prevent the window from being captured by screen recording
   state.mainWindow.webContents.setBackgroundThrottling(false)
   state.mainWindow.webContents.setFrameRate(60)
+
+  refreshScreenMetrics()
 
   // Set up window listeners
   state.mainWindow.on("move", handleWindowMove)
@@ -393,6 +436,40 @@ function handleWindowClosed(): void {
 }
 
 // Window visibility functions
+function hideForScreenshot(): void {
+  if (!state.mainWindow || state.mainWindow.isDestroyed()) return
+
+  state.wasVisibleBeforeScreenshot = state.isWindowVisible
+  if (!state.isWindowVisible) return
+
+  const bounds = state.mainWindow.getBounds()
+  state.windowPosition = { x: bounds.x, y: bounds.y }
+  state.windowSize = { width: bounds.width, height: bounds.height }
+  state.mainWindow.hide()
+  state.isWindowVisible = false
+  console.log("Window hidden for screenshot capture")
+}
+
+function showAfterScreenshot(): void {
+  if (!state.mainWindow || state.mainWindow.isDestroyed()) return
+  if (!state.wasVisibleBeforeScreenshot) return
+
+  if (state.windowPosition && state.windowSize) {
+    state.mainWindow.setBounds({
+      ...state.windowPosition,
+      ...state.windowSize
+    })
+  }
+
+  const savedOpacity = configHelper.getOpacity()
+  state.mainWindow.setContentProtection(false)
+  state.mainWindow.setIgnoreMouseEvents(false)
+  state.mainWindow.show()
+  state.mainWindow.setOpacity(savedOpacity > 0.1 ? savedOpacity : 1)
+  state.isWindowVisible = true
+  console.log("Window restored after screenshot capture")
+}
+
 function hideMainWindow(): void {
   if (!state.mainWindow?.isDestroyed()) {
     const bounds = state.mainWindow.getBounds();
@@ -411,19 +488,20 @@ function showMainWindow(): void {
       state.mainWindow.setBounds({
         ...state.windowPosition,
         ...state.windowSize
-      });
+      })
     }
-    state.mainWindow.setIgnoreMouseEvents(false);
-    state.mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
+    state.mainWindow.setIgnoreMouseEvents(false)
+    state.mainWindow.setAlwaysOnTop(true, "screen-saver", 1)
     state.mainWindow.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true
-    });
-    state.mainWindow.setContentProtection(true);
-    state.mainWindow.setOpacity(0); // Set opacity to 0 before showing
-    state.mainWindow.showInactive(); // Use showInactive instead of show+focus
-    state.mainWindow.setOpacity(1); // Then set opacity to 1 after showing
-    state.isWindowVisible = true;
-    console.log('Window shown with showInactive(), opacity set to 1');
+    })
+    state.mainWindow.setContentProtection(false)
+    const savedOpacity = configHelper.getOpacity()
+    state.mainWindow.show()
+    state.mainWindow.setOpacity(savedOpacity > 0.1 ? savedOpacity : 1)
+    state.mainWindow.focus()
+    state.isWindowVisible = true
+    console.log("Window shown")
   }
 }
 
@@ -449,23 +527,12 @@ function moveWindowHorizontal(updateFn: (x: number) => number): void {
 function moveWindowVertical(updateFn: (y: number) => number): void {
   if (!state.mainWindow) return
 
+  const virtual = getVirtualWorkAreaBounds()
+  const windowHeight = state.windowSize?.height || 0
   const newY = updateFn(state.currentY)
-  // Allow window to go 2/3 off screen in either direction
-  const maxUpLimit = (-(state.windowSize?.height || 0) * 2) / 3
-  const maxDownLimit =
-    state.screenHeight + ((state.windowSize?.height || 0) * 2) / 3
+  const maxUpLimit = virtual.minY - (windowHeight * 2) / 3
+  const maxDownLimit = virtual.maxY + (windowHeight * 2) / 3 - windowHeight
 
-  // Log the current state and limits
-  console.log({
-    newY,
-    maxUpLimit,
-    maxDownLimit,
-    screenHeight: state.screenHeight,
-    windowHeight: state.windowSize?.height,
-    currentY: state.currentY
-  })
-
-  // Only update if within bounds
   if (newY >= maxUpLimit && newY <= maxDownLimit) {
     state.currentY = newY
     state.mainWindow.setPosition(
@@ -475,20 +542,47 @@ function moveWindowVertical(updateFn: (y: number) => number): void {
   }
 }
 
+/** 다음 모니터로 창 이동 (좌→우 순, 마지막이면 첫 모니터) */
+function moveWindowToNextDisplay(): void {
+  if (!state.mainWindow || state.mainWindow.isDestroyed()) return
+
+  const displays = screen.getAllDisplays()
+  if (displays.length <= 1) return
+
+  const sorted = [...displays].sort(
+    (a, b) => a.workArea.x - b.workArea.x || a.workArea.y - b.workArea.y
+  )
+  const current = getDisplayForWindow()
+  const currentIndex = sorted.findIndex((d) => d.id === current.id)
+  const nextDisplay = sorted[(currentIndex + 1) % sorted.length]
+  const workArea = nextDisplay.workArea
+  const bounds = state.mainWindow.getBounds()
+  const width = state.windowSize?.width ?? bounds.width
+  const height = state.windowSize?.height ?? bounds.height
+
+  const newX = workArea.x + Math.max(0, Math.round((workArea.width - width) / 2))
+  const newY = workArea.y + Math.max(0, Math.round((workArea.height - height) / 2))
+
+  state.currentX = newX
+  state.currentY = newY
+  state.mainWindow.setPosition(newX, newY)
+  console.log(`[Window] Switched to display ${nextDisplay.id} (${newX}, ${newY})`)
+}
+
 // Window dimension functions
 function setWindowDimensions(width: number, height: number): void {
   if (state.windowLayoutMode === "settings") return
   if (!state.mainWindow?.isDestroyed()) {
     const [currentX, currentY] = state.mainWindow.getPosition()
-    const primaryDisplay = screen.getPrimaryDisplay()
-    const workArea = primaryDisplay.workAreaSize
+    const display = getDisplayForWindow()
+    const workArea = display.workArea
     const maxWidth = Math.floor(workArea.width * 0.9)
     const safeWidth = Math.max(MIN_WINDOW_WIDTH, Math.min(Math.ceil(width) + 24, maxWidth))
     const safeHeight = Math.max(MIN_WINDOW_HEIGHT, Math.ceil(height) + 16)
-    const maxX = Math.max(0, workArea.width - safeWidth)
+    const maxX = workArea.x + Math.max(0, workArea.width - safeWidth)
 
     state.mainWindow.setBounds({
-      x: Math.min(Math.max(0, currentX), maxX),
+      x: Math.min(Math.max(workArea.x, currentX), maxX),
       y: currentY,
       width: safeWidth,
       height: safeHeight
@@ -507,7 +601,8 @@ function setWindowLayoutMode(
     return
   }
 
-  const workArea = screen.getPrimaryDisplay().workAreaSize
+  const display = getDisplayForWindow()
+  const workArea = display.workArea
   const [currentX, currentY] = state.mainWindow.getPosition()
 
   if (mode === "settings") {
@@ -526,10 +621,10 @@ function setWindowLayoutMode(
       Math.max(dimensions?.height ?? SETTINGS_MIN_HEIGHT, SETTINGS_MIN_HEIGHT),
       Math.floor(workArea.height * 0.92)
     )
-    const maxX = Math.max(0, workArea.width - width)
+    const maxX = workArea.x + Math.max(0, workArea.width - width)
 
     state.mainWindow.setBounds({
-      x: Math.min(Math.max(0, currentX), maxX),
+      x: Math.min(Math.max(workArea.x, currentX), maxX),
       y: currentY,
       width,
       height
@@ -543,9 +638,9 @@ function setWindowLayoutMode(
 
   if (state.compactWindowSize) {
     const { width, height } = state.compactWindowSize
-    const maxX = Math.max(0, workArea.width - width)
+    const maxX = workArea.x + Math.max(0, workArea.width - width)
     state.mainWindow.setBounds({
-      x: Math.min(Math.max(0, currentX), maxX),
+      x: Math.min(Math.max(workArea.x, currentX), maxX),
       y: currentY,
       width,
       height
@@ -609,17 +704,26 @@ async function initializeApp() {
       clearQueues,
       setView,
       moveWindowLeft: () =>
-        moveWindowHorizontal((x) => Math.max(0, x - state.step)),
+        moveWindowHorizontal((x) => {
+          const virtual = getVirtualWorkAreaBounds()
+          const w = state.windowSize?.width ?? DEFAULT_WINDOW_WIDTH
+          return Math.max(virtual.minX - (w * 2) / 3, x - state.step)
+        }),
       moveWindowRight: () =>
         moveWindowHorizontal((x) => {
+          const virtual = getVirtualWorkAreaBounds()
           const w = state.windowSize?.width ?? DEFAULT_WINDOW_WIDTH
-          return Math.min(state.screenWidth - w, x + state.step)
+          return Math.min(virtual.maxX - w / 3, x + state.step)
         }),
       moveWindowUp: () => moveWindowVertical((y) => y - state.step),
       moveWindowDown: () => moveWindowVertical((y) => y + state.step)
     })
     await createWindow()
     state.shortcutsHelper?.registerGlobalShortcuts()
+
+    screen.on("display-added", refreshScreenMetrics)
+    screen.on("display-removed", refreshScreenMetrics)
+    screen.on("display-metrics-changed", refreshScreenMetrics)
 
     // Initialize auto-updater regardless of environment
     initAutoUpdater()
@@ -692,8 +796,8 @@ async function takeScreenshot(): Promise<string[]> {
   if (!state.mainWindow) throw new Error("No main window available")
   const paths =
     (await state.screenshotHelper?.takeScreenshot(
-      () => hideMainWindow(),
-      () => showMainWindow()
+      () => hideForScreenshot(),
+      () => showAfterScreenshot()
     )) || []
 
   for (const screenshotPath of paths) {

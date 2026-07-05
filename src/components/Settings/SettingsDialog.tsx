@@ -10,28 +10,23 @@ import {
 import { requestLayoutRemeasure } from "../../hooks/useContentDimensions";
 
 type ModelCategory = {
-  key: "extractionModel" | "solutionModel" | "debuggingModel";
-  title: string;
-  description: string;
-};
+  key: "agentModel" | "extractionModel"
+  title: string
+  description: string
+}
 
 const modelCategories: ModelCategory[] = [
   {
+    key: "agentModel",
+    title: "Super Agent",
+    description: "업무 실행, 도구 호출, sub-agent 위임에 사용"
+  },
+  {
     key: "extractionModel",
-    title: "Problem Extraction",
-    description: "Model used to analyze screenshots and extract problem details"
-  },
-  {
-    key: "solutionModel",
-    title: "Solution Generation",
-    description: "Model used to generate coding solutions"
-  },
-  {
-    key: "debuggingModel",
-    title: "Debugging",
-    description: "Model used to debug and improve solutions"
+    title: "의도 분류",
+    description: "스크린샷에서 업무 유형(회의실·휴가·자산 반출 등) 분류"
   }
-];
+]
 
 interface SettingsDialogProps {
   open?: boolean;
@@ -47,9 +42,8 @@ export function SettingsDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [apiProvider, setApiProvider] = useState<APIProvider>("openai");
-  const [extractionModel, setExtractionModel] = useState(DEFAULT_MODELS.openai.extraction);
-  const [solutionModel, setSolutionModel] = useState(DEFAULT_MODELS.openai.solution);
-  const [debuggingModel, setDebuggingModel] = useState(DEFAULT_MODELS.openai.debugging);
+  const [agentModel, setAgentModel] = useState(DEFAULT_MODELS.openai.agent)
+  const [classifierModel, setClassifierModel] = useState(DEFAULT_MODELS.openai.classifier)
   const [gportalUrl, setGportalUrl] = useState("");
   const [gportalUsername, setGportalUsername] = useState("");
   const [envSources, setEnvSources] = useState<string[]>([]);
@@ -100,9 +94,8 @@ export function SettingsDialog({
       .then((config: Config) => {
         setApiKey(config.apiKey || "");
         setApiProvider(config.apiProvider || "openai");
-        setExtractionModel(config.extractionModel || DEFAULT_MODELS.openai.extraction);
-        setSolutionModel(config.solutionModel || DEFAULT_MODELS.openai.solution);
-        setDebuggingModel(config.debuggingModel || DEFAULT_MODELS.openai.debugging);
+        setAgentModel(config.agentModel || config.solutionModel || DEFAULT_MODELS.openai.agent)
+        setClassifierModel(config.extractionModel || DEFAULT_MODELS.openai.classifier)
         setGportalUrl(config.gportalUrl || "");
         setGportalUsername(config.gportalUsername || "");
         setEnvSources(config.envSources ?? []);
@@ -118,12 +111,11 @@ export function SettingsDialog({
   }, [open, showToast]);
 
   const handleProviderChange = (provider: APIProvider) => {
-    setApiProvider(provider);
-    const defaults = DEFAULT_MODELS[provider];
-    setExtractionModel(defaults.extraction);
-    setSolutionModel(defaults.solution);
-    setDebuggingModel(defaults.debugging);
-  };
+    setApiProvider(provider)
+    const defaults = DEFAULT_MODELS[provider]
+    setAgentModel(defaults.agent)
+    setClassifierModel(defaults.classifier)
+  }
 
   const handleSave = async () => {
     setIsLoading(true);
@@ -131,13 +123,12 @@ export function SettingsDialog({
       const result = await window.electronAPI.updateConfig({
         apiKey,
         apiProvider,
-        extractionModel,
-        solutionModel,
-        debuggingModel,
-        agentModel: solutionModel,
+        agentModel,
+        extractionModel: classifierModel,
+        solutionModel: agentModel,
         gportalUrl,
         gportalUsername
-      });
+      })
 
       if (result) {
         showToast("완료", "설정이 저장되었습니다 (.env)", "success");
@@ -271,19 +262,11 @@ export function SettingsDialog({
             <div className="space-y-4">
               <label className="text-sm font-medium text-white">AI Model Selection</label>
               {modelCategories.map((category) => {
-                const models = modelsForProvider(apiProvider);
+                const models = modelsForProvider(apiProvider)
                 const currentValue =
-                  category.key === "extractionModel"
-                    ? extractionModel
-                    : category.key === "solutionModel"
-                    ? solutionModel
-                    : debuggingModel;
+                  category.key === "agentModel" ? agentModel : classifierModel
                 const setValue =
-                  category.key === "extractionModel"
-                    ? setExtractionModel
-                    : category.key === "solutionModel"
-                    ? setSolutionModel
-                    : setDebuggingModel;
+                  category.key === "agentModel" ? setAgentModel : setClassifierModel
 
                 return (
                   <div key={category.key} className="mb-4">

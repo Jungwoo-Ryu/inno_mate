@@ -1,11 +1,6 @@
 import type { AgentSummary, AttachmentFile, McpServerConfig } from "./agents"
 
 export interface ElectronAPI {
-  // Original methods
-  openSubscriptionPortal: (authData: {
-    id: string
-    email: string
-  }) => Promise<{ success: boolean; error?: string }>
   updateContentDimensions: (dimensions: {
     width: number
     height: number
@@ -16,11 +11,7 @@ export interface ElectronAPI {
   ) => Promise<{ success: boolean; mode: "compact" | "settings" }>
   getWindowLayoutMode: () => Promise<"compact" | "settings">
   clearStore: () => Promise<{ success: boolean; error?: string }>
-  getScreenshots: () => Promise<{
-    success: boolean
-    previews?: Array<{ path: string; preview: string }> | null
-    error?: string
-  }>
+  getScreenshots: () => Promise<Array<{ path: string; preview: string }>>
   deleteScreenshot: (
     path: string
   ) => Promise<{ success: boolean; error?: string }>
@@ -28,15 +19,10 @@ export interface ElectronAPI {
     callback: (data: { path: string; preview: string }) => void
   ) => () => void
   onResetView: (callback: () => void) => () => void
-  onSolutionStart: (callback: () => void) => () => void
-  onDebugStart: (callback: () => void) => () => void
-  onDebugSuccess: (callback: (data: any) => void) => () => void
-  onSolutionError: (callback: (error: string) => void) => () => void
+  onAgentRunStart: (callback: () => void) => () => void
+  onAgentRunError: (callback: (error: string) => void) => () => void
   onProcessingNoScreenshots: (callback: () => void) => () => void
-  onProblemExtracted: (callback: (data: any) => void) => () => void
-  onSolutionSuccess: (callback: (data: any) => void) => () => void
-  onUnauthorized: (callback: () => void) => () => void
-  onDebugError: (callback: (error: string) => void) => () => void
+  onAgentRunSuccess: (callback: (data: unknown) => void) => () => void
   openExternal: (url: string) => void
   toggleMainWindow: () => Promise<{ success: boolean; error?: string }>
   triggerScreenshot: () => Promise<{ success: boolean; error?: string }>
@@ -46,6 +32,8 @@ export interface ElectronAPI {
   listAgents: () => Promise<AgentSummary[]>
   reloadAgent: (agentId: string) => Promise<{ success: boolean }>
   openAgentsDirectory: () => Promise<{ success: boolean }>
+  syncWebAgents: () => Promise<{ success: boolean; synced: string[]; error?: string }>
+  openWebPortal: () => Promise<{ success: boolean }>
   getMcpServers: () => Promise<McpServerConfig[]>
   saveMcpServers: (servers: McpServerConfig[]) => Promise<McpServerConfig[]>
   testMcpConnection: (server: McpServerConfig) => Promise<{ ok: boolean; error?: string }>
@@ -55,45 +43,28 @@ export interface ElectronAPI {
   triggerMoveRight: () => Promise<{ success: boolean; error?: string }>
   triggerMoveUp: () => Promise<{ success: boolean; error?: string }>
   triggerMoveDown: () => Promise<{ success: boolean; error?: string }>
-  onSubscriptionUpdated: (callback: () => void) => () => void
-  onSubscriptionPortalClosed: (callback: () => void) => () => void
   startUpdate: () => Promise<{ success: boolean; error?: string }>
   installUpdate: () => void
-  onUpdateAvailable: (callback: (info: any) => void) => () => void
-  onUpdateDownloaded: (callback: (info: any) => void) => () => void
-
-  decrementCredits: () => Promise<void>
-  setInitialCredits: (credits: number) => Promise<void>
-  onCreditsUpdated: (callback: (credits: number) => void) => () => void
-  onOutOfCredits: (callback: () => void) => () => void
-  openSettingsPortal: () => Promise<void>
+  onUpdateAvailable: (callback: (info: unknown) => void) => () => void
+  onUpdateDownloaded: (callback: (info: unknown) => void) => () => void
   getPlatform: () => string
-  
-  // New methods for OpenAI integration
-  getConfig: () => Promise<{ apiKey: string; model: string }>
-  updateConfig: (config: { apiKey?: string; model?: string }) => Promise<boolean>
+  getConfig: () => Promise<Record<string, unknown>>
+  updateConfig: (config: Record<string, unknown>) => Promise<boolean>
   checkApiKey: () => Promise<boolean>
   validateApiKey: (apiKey: string) => Promise<{ valid: boolean; error?: string }>
   openLink: (url: string) => void
   onApiKeyInvalid: (callback: () => void) => () => void
-  removeListener: (eventName: string, callback: (...args: any[]) => void) => void
+  removeListener: (eventName: string, callback: (...args: unknown[]) => void) => void
+  onDeleteLastScreenshot: (callback: () => void) => () => void
+  deleteLastScreenshot: () => Promise<unknown>
+  onShowSettings: (callback: () => void) => () => void
 }
 
 declare global {
   interface Window {
     electronAPI: ElectronAPI
-    electron: {
-      ipcRenderer: {
-        on: (channel: string, func: (...args: any[]) => void) => void
-        removeListener: (
-          channel: string,
-          func: (...args: any[]) => void
-        ) => void
-      }
-    }
-    __CREDITS__: number
-    __LANGUAGE__: string
     __IS_INITIALIZED__: boolean
-    __AUTH_TOKEN__?: string | null
   }
 }
+
+export {}

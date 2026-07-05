@@ -98,6 +98,11 @@ export class ShortcutsHelper {
       this.deps.moveWindowUp()
     })
 
+    globalShortcut.register("CommandOrControl+\\", () => {
+      console.log("Command/Ctrl + \\ pressed. Moving window to next display.")
+      this.deps.moveWindowToNextDisplay()
+    })
+
     globalShortcut.register("CommandOrControl+B", () => {
       console.log("Command/Ctrl + B pressed. Toggling window visibility.")
       this.deps.toggleMainWindow()

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react"
-import { Bot, FolderOpen, RefreshCw, X } from "lucide-react"
+import { Bot, CloudDownload, ExternalLink, FolderOpen, RefreshCw, X } from "lucide-react"
 import { useToast } from "../../contexts/toast"
 import { AGENT_LABELS, type AgentSummary } from "../../types/agents"
 
@@ -12,6 +12,24 @@ const AgentManagerSheet: React.FC<AgentManagerSheetProps> = ({ open, onClose }) 
   const { showToast } = useToast()
   const [agents, setAgents] = useState<AgentSummary[]>([])
   const [loading, setLoading] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+
+  const syncFromWeb = async () => {
+    setSyncing(true)
+    try {
+      const result = await window.electronAPI.syncWebAgents()
+      if (result.success) {
+        showToast("완료", `웹에서 에이전트 ${result.synced.length}개 동기화됨`, "success")
+        await loadAgents()
+      } else {
+        showToast("오류", result.error ?? "웹 동기화에 실패했습니다", "error")
+      }
+    } catch {
+      showToast("오류", "웹 동기화에 실패했습니다", "error")
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const loadAgents = async () => {
     setLoading(true)
@@ -39,6 +57,22 @@ const AgentManagerSheet: React.FC<AgentManagerSheetProps> = ({ open, onClose }) 
           <span className="text-[13px] font-medium text-white/90">에이전트 관리</span>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={syncFromWeb}
+            className="p-1.5 rounded-lg hover:bg-white/10 text-white/50"
+            title="웹 레지스트리에서 동기화"
+          >
+            <CloudDownload className={`w-3.5 h-3.5 ${syncing ? "animate-pulse" : ""}`} />
+          </button>
+          <button
+            type="button"
+            onClick={() => window.electronAPI.openWebPortal()}
+            className="p-1.5 rounded-lg hover:bg-white/10 text-white/50"
+            title="웹 포털 열기 (에이전트 관리)"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </button>
           <button
             type="button"
             onClick={() => window.electronAPI.openAgentsDirectory()}

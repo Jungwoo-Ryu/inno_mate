@@ -8,8 +8,7 @@ import { Screenshot } from "../types/screenshots"
 
 async function fetchScreenshots(): Promise<Screenshot[]> {
   try {
-    const existing = await window.electronAPI.getScreenshots()
-    return existing
+    return await window.electronAPI.getScreenshots()
   } catch (error) {
     console.error("Error loading screenshots:", error)
     throw error
@@ -17,20 +16,14 @@ async function fetchScreenshots(): Promise<Screenshot[]> {
 }
 
 interface QueueProps {
-  setView: (view: "queue" | "solutions" | "debug") => void
-  credits: number
-  currentLanguage: string
-  setLanguage: (language: string) => void
+  setView: (view: "queue" | "result") => void
 }
 
-const Queue: React.FC<QueueProps> = ({ setView, credits }) => {
+const Queue: React.FC<QueueProps> = ({ setView }) => {
   const { showToast } = useToast()
   const contentRef = useRef<HTMLDivElement>(null)
 
-  const {
-    data: screenshots = [],
-    refetch
-  } = useQuery<Screenshot[]>({
+  const { data: screenshots = [], refetch } = useQuery<Screenshot[]>({
     queryKey: ["screenshots"],
     queryFn: fetchScreenshots,
     staleTime: Infinity,
@@ -65,17 +58,17 @@ const Queue: React.FC<QueueProps> = ({ setView, credits }) => {
           showToast("안내", "삭제할 스크린샷이 없습니다", "neutral")
         }
       }),
-      window.electronAPI.onSolutionError((error: string) => {
+      window.electronAPI.onAgentRunError((error: string) => {
         showToast("오류", "처리 중 문제가 발생했습니다", "error")
         setView("queue")
-        console.error("Processing error:", error)
+        console.error("Agent error:", error)
       }),
       window.electronAPI.onProcessingNoScreenshots(() => {
         showToast("안내", "처리할 스크린샷이 없습니다", "neutral")
       })
     ]
     return () => cleanupFunctions.forEach((cleanup) => cleanup())
-  }, [screenshots])
+  }, [screenshots, setView, showToast])
 
   return (
     <div ref={contentRef} className="app-content px-3 py-3">
@@ -87,7 +80,7 @@ const Queue: React.FC<QueueProps> = ({ setView, credits }) => {
             onDeleteScreenshot={handleDeleteScreenshot}
           />
         )}
-        <QueuePanel screenshotCount={screenshots.length} credits={credits} />
+        <QueuePanel screenshotCount={screenshots.length} />
       </div>
     </div>
   )
