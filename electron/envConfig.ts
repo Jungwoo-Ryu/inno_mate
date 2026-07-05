@@ -5,6 +5,7 @@
  */
 export const ENV = {
   OPENAI_API_KEY: "OPENAI_API_KEY",
+  OPENAI_BASE_URL: "OPENAI_BASE_URL",
   GEMINI_API_KEY: "GEMINI_API_KEY",
   ANTHROPIC_API_KEY: "ANTHROPIC_API_KEY",
   INNOMATE_API_PROVIDER: "INNOMATE_API_PROVIDER",
@@ -113,6 +114,12 @@ export function readEnvOverrides(): EnvOverrides {
   if (agentModel) overrides.agentModel = agentModel
 
   return overrides
+}
+
+/** 사내 OpenAI 게이트웨이 URL (.env OPENAI_BASE_URL). 없으면 undefined → 공식 API */
+export function getOpenAIBaseUrl(): string | undefined {
+  const url = process.env[ENV.OPENAI_BASE_URL]?.trim()
+  return url ? url.replace(/\/$/, "") : undefined
 }
 
 export function hasEnvApiKey(): boolean {

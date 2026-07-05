@@ -8,6 +8,7 @@ import { harnessWatcher } from "./harness/HarnessWatcher"
 import { loadAttachments } from "./attachments"
 import { extractTextFromScreenshotPaths } from "./ocr/LocalOcr"
 import { isPocOcrMode } from "./pocMode"
+import { getOpenAIBaseUrl } from "./envConfig"
 import type { AgentRunResult } from "./harness/types"
 
 const GEMINI_OPENAI_BASE_URL =
@@ -57,7 +58,11 @@ export class AgentOrchestrator {
         baseURL: GEMINI_OPENAI_BASE_URL
       })
     } else if (config.apiProvider === "openai") {
-      this.openaiClient = new OpenAI({ apiKey: config.apiKey })
+      // 사내 게이트웨이 URL(.env OPENAI_BASE_URL)이 있으면 그쪽으로 전송
+      this.openaiClient = new OpenAI({
+        apiKey: config.apiKey,
+        baseURL: getOpenAIBaseUrl()
+      })
     } else {
       this.openaiClient = null
     }
@@ -157,11 +162,19 @@ export class AgentOrchestrator {
     }
   }
 
+  /**
+   * PoC OCR 파이프라인:
+   * 1) 스크린샷에서 로컬 OCR로 텍스트 추출 (이미지는 외부로 전송하지 않음)
+   * 2) OCR 텍스트를 프롬프트로 만들어 사내 OpenAI API(Super Agent)에 전송
+   * 3) Super Agent가 적합한 서브 에이전트로 할당해 실행
+   * API 키가 없으면 OCR 텍스트만 표시 (폴백)
+   */
   private async processWithLocalOcr(screenshotPaths: string[]): Promise<void> {
     const mainWindow = this.deps.getMainWindow()
     if (!mainWindow) return
 
     this.isProcessing = true
+    const userPrompt = this.pendingUserPrompt
     this.pendingUserPrompt = undefined
     this.pendingAttachmentPaths = []
     mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
@@ -169,16 +182,37 @@ export class AgentOrchestrator {
     try {
       console.log("[AgentOrchestrator] PoC local OCR mode")
       const ocrText = await extractTextFromScreenshotPaths(screenshotPaths)
-      this.handleResult({
-        status: "success",
-        agentId: "local-ocr",
-        message_ko: ocrText,
-        data: {
-          mode: "poc-ocr",
-          screenshotCount: screenshotPaths.length
-        }
-      })
+
+      if (!this.openaiClient) {
+        this.initializeAIClient()
+      }
+
+      // 폴백: API 키가 없으면 OCR 텍스트만 표시
+      if (!this.openaiClient) {
+        console.log("[AgentOrchestrator] No API key — showing OCR text only")
+        this.handleResult({
+          status: "success",
+          agentId: "local-ocr",
+          message_ko: ocrText,
+          data: { mode: "poc-ocr", screenshotCount: screenshotPaths.length }
+        })
+        return
+      }
+
+      // Super Agent 라우팅: OCR 텍스트 → 사내 OpenAI API → 서브 에이전트 실행
+      console.log("[AgentOrchestrator] Routing OCR text via Super Agent")
+      this.currentAbortController = new AbortController()
+      const { signal } = this.currentAbortController
+
+      const result = await harnessRunner.runFromOcrText(ocrText, userPrompt, signal)
+
+      if (signal.aborted) return
+      this.handleResult(result)
     } catch (error: unknown) {
+      if (isAbortError(error)) {
+        console.log("[AgentOrchestrator] OCR agent run cancelled")
+        return
+      }
       const message =
         error instanceof Error ? error.message : "OCR 처리 중 오류가 발생했습니다"
       mainWindow.webContents.send(
@@ -187,6 +221,7 @@ export class AgentOrchestrator {
       )
       this.deps.setView("queue")
     } finally {
+      this.currentAbortController = null
       this.isProcessing = false
     }
   }

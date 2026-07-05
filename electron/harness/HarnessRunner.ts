@@ -1,7 +1,7 @@
 import { OpenAI } from "openai"
 import type { ChatCompletionTool } from "openai/resources/chat/completions"
 import { harnessLoader } from "./HarnessLoader"
-import { classifyIntent } from "./IntentClassifier"
+import { classifyIntent, classifyIntentFromText } from "./IntentClassifier"
 import type { AgentRunResult, AttachmentPayload, LoadedHarness, ScreenshotPayload } from "./types"
 import { getGPortalTools, executeGPortalTool } from "../gportal/tools"
 import { configHelper } from "../ConfigHelper"
@@ -100,6 +100,95 @@ export class HarnessRunner {
     return this.runHarness(harness, screenshots, userPrompt, extractedFields, attachments, signal)
   }
 
+  /**
+   * PoC OCR 파이프라인: OCR 텍스트를 프롬프트로 만들어 Super Agent(사내 OpenAI API)에 전송,
+   * 적합한 서브 에이전트로 라우팅한 뒤 해당 harness를 실행한다. 이미지는 전송하지 않는다.
+   */
+  async runFromOcrText(
+    ocrText: string,
+    userPrompt?: string,
+    signal?: AbortSignal
+  ): Promise<AgentRunResult & { routedFrom?: string }> {
+    throwIfAborted(signal)
+    if (!this.client) {
+      return {
+        status: "error",
+        agentId: "super",
+        message_ko: "OpenAI API 키가 설정되지 않았습니다. 설정에서 API 키를 입력해 주세요."
+      }
+    }
+
+    // 1) Super Agent 라우팅: OCR 텍스트로 의도 분류 → 서브 에이전트 할당
+    const config = configHelper.loadConfig()
+    const classification = await classifyIntentFromText(
+      this.client,
+      ocrText,
+      userPrompt,
+      config.extractionModel || DEFAULT_MODELS.openai.classifier,
+      signal
+    )
+    console.log(
+      `[HarnessRunner] OCR routing → ${classification.agentId} (confidence ${classification.confidence})`
+    )
+
+    if (classification.confidence < 0.4) {
+      return {
+        status: "needs_input",
+        agentId: classification.agentId,
+        message_ko:
+          "OCR 텍스트로 업무 유형을 파악하지 못했습니다. G-portal 업무 화면인지 확인하거나 프롬프트를 함께 입력해 주세요.",
+        data: { ocrText }
+      }
+    }
+
+    const agentId = classification.agentId
+    const harness = harnessLoader.loadHarness(agentId)
+    if (!harness) {
+      return {
+        status: "error",
+        agentId,
+        message_ko: `에이전트 '${agentId}' 설정을 찾을 수 없습니다.`
+      }
+    }
+
+    // 2) 서브 에이전트 실행: OCR 텍스트를 컨텍스트로 전달
+    const ocrPromptText = [
+      userPrompt?.trim() ? `User request: ${userPrompt.trim()}` : null,
+      `Execute the task based on the following OCR text extracted from the user's G-portal screen capture. The text may contain OCR errors — interpret robustly.`,
+      `[OCR text]\n${ocrText}`,
+      Object.keys(classification.extractedFields).length > 0
+        ? `Extracted fields: ${JSON.stringify(classification.extractedFields)}`
+        : null
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+
+    const result = await this.runHarnessWithText(harness, ocrPromptText, signal)
+    return { ...result, routedFrom: "super", data: { ...result.data, ocrText } }
+  }
+
+  /** 텍스트 전용 harness 실행 (이미지 미전송) */
+  private async runHarnessWithText(
+    harness: LoadedHarness,
+    userText: string,
+    signal?: AbortSignal
+  ): Promise<AgentRunResult> {
+    if (!this.client) {
+      return {
+        status: "error",
+        agentId: harness.config.id,
+        message_ko: "OpenAI 클라이언트가 초기화되지 않았습니다."
+      }
+    }
+
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: "system", content: harness.guideContent },
+      { role: "user", content: userText }
+    ]
+
+    return this.runToolLoop(harness, messages, signal)
+  }
+
   private buildUserContent(
     screenshots: ScreenshotPayload[],
     userPrompt?: string,
@@ -183,6 +272,23 @@ export class HarnessRunner {
         )
       }
     ]
+
+    return this.runToolLoop(harness, messages, signal)
+  }
+
+  /** 공용 툴 실행 루프: harness의 도구를 호출하며 최종 결과를 반환 */
+  private async runToolLoop(
+    harness: LoadedHarness,
+    messages: OpenAI.Chat.ChatCompletionMessageParam[],
+    signal?: AbortSignal
+  ): Promise<AgentRunResult> {
+    if (!this.client) {
+      return {
+        status: "error",
+        agentId: harness.config.id,
+        message_ko: "OpenAI 클라이언트가 초기화되지 않았습니다."
+      }
+    }
 
     const tools = buildTools(harness)
     const config = configHelper.loadConfig()
