@@ -13,7 +13,6 @@ import {
   type McpServerConfig
 } from "./mcp/McpStore"
 import { DEFAULT_MODELS } from "./aiModels"
-import { isPocOcrMode } from "./pocMode"
 import { getWebBaseUrl, syncAgentsFromWeb } from "./webRegistry"
 
 export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
@@ -21,10 +20,7 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
 
   // Configuration handlers
   ipcMain.handle("get-config", () => {
-    return {
-      ...configHelper.loadConfig(),
-      pocOcrMode: isPocOcrMode()
-    }
+    return configHelper.loadConfig()
   })
 
   ipcMain.handle("update-config", (_event, updates) => {
@@ -32,7 +28,6 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   })
 
   ipcMain.handle("check-api-key", () => {
-    if (isPocOcrMode()) return true
     return configHelper.hasApiKey()
   })
   
@@ -69,7 +64,7 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
 
   // Screenshot processing handlers
   ipcMain.handle("process-screenshots", async () => {
-    if (!isPocOcrMode() && !configHelper.hasApiKey()) {
+    if (!configHelper.hasApiKey()) {
       const mainWindow = deps.getMainWindow()
       if (mainWindow) {
         mainWindow.webContents.send(deps.PROCESSING_EVENTS.API_KEY_INVALID)
@@ -298,7 +293,7 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   // Process screenshot handlers
   ipcMain.handle("trigger-process-screenshots", async (_event, prompt?: string) => {
     try {
-      if (!isPocOcrMode() && !configHelper.hasApiKey()) {
+      if (!configHelper.hasApiKey()) {
         const mainWindow = deps.getMainWindow()
         if (mainWindow) {
           mainWindow.webContents.send(deps.PROCESSING_EVENTS.API_KEY_INVALID)

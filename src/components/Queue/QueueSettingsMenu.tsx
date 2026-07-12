@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { Settings2 } from "lucide-react"
 import { useToast } from "../../contexts/toast"
 
@@ -13,6 +13,17 @@ const QueueSettingsMenu: React.FC<QueueSettingsMenuProps> = ({
   const { showToast } = useToast()
   const menuRef = useRef<HTMLDivElement>(null)
 
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown)
+    return () => document.removeEventListener("pointerdown", onPointerDown)
+  }, [open])
+
   const handleSignOut = async () => {
     try {
       localStorage.clear()
@@ -25,37 +36,46 @@ const QueueSettingsMenu: React.FC<QueueSettingsMenuProps> = ({
     }
   }
 
+  const handleOpenSettings = async () => {
+    setOpen(false)
+    try {
+      await window.electronAPI.openSettingsPortal()
+    } catch (err) {
+      console.error("Failed to open settings:", err)
+      showToast("오류", "설정을 열 수 없습니다", "error")
+    }
+  }
+
   return (
-    <div
-      ref={menuRef}
-      className="relative"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
+    <div ref={menuRef} className="relative">
       <button
         type="button"
+        onClick={() => setOpen((v) => !v)}
         className="flex items-center justify-center w-8 h-8 rounded-lg text-white/50 hover:text-white/90 hover:bg-white/10 transition-colors"
         aria-label="설정"
+        aria-expanded={open}
       >
         <Settings2 className="w-4 h-4" />
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 mt-2 w-56 z-50">
-          <div className="absolute -top-2 right-0 w-full h-2" />
-          <div className="p-2 rounded-xl border border-white/10 bg-black/90 backdrop-blur-xl shadow-xl text-xs text-white/90">
+        <div className="absolute top-full right-0 z-50 mt-1.5 w-56">
+          <div className="rounded-xl border border-white/10 bg-black/95 p-2 text-xs text-white/90 shadow-xl backdrop-blur-xl">
             <button
               type="button"
-              onClick={() => window.electronAPI.openSettingsPortal()}
-              className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 transition-colors"
+              onClick={() => void handleOpenSettings()}
+              className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-white/10"
             >
               설정 열기
             </button>
             {screenshotCount > 0 && (
               <button
                 type="button"
-                onClick={() => window.electronAPI.deleteLastScreenshot()}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 transition-colors"
+                onClick={() => {
+                  setOpen(false)
+                  void window.electronAPI.deleteLastScreenshot()
+                }}
+                className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-white/10"
               >
                 마지막 스크린샷 삭제
               </button>
@@ -63,8 +83,8 @@ const QueueSettingsMenu: React.FC<QueueSettingsMenuProps> = ({
             <div className="my-1 border-t border-white/10" />
             <button
               type="button"
-              onClick={handleSignOut}
-              className="w-full text-left px-3 py-2 rounded-lg text-red-400 hover:bg-white/10 transition-colors"
+              onClick={() => void handleSignOut()}
+              className="w-full rounded-lg px-3 py-2 text-left text-red-400 transition-colors hover:bg-white/10"
             >
               로그아웃
             </button>

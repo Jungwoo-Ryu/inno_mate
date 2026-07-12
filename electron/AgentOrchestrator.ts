@@ -6,9 +6,8 @@ import { configHelper } from "./ConfigHelper"
 import { harnessRunner, isAbortError } from "./harness/HarnessRunner"
 import { harnessWatcher } from "./harness/HarnessWatcher"
 import { loadAttachments } from "./attachments"
-import { extractTextFromScreenshotPaths } from "./ocr/LocalOcr"
-import { isPocOcrMode } from "./pocMode"
 import { getOpenAIBaseUrl } from "./envConfig"
+import { syncAgentsFromWeb } from "./webRegistry"
 import type { AgentRunResult } from "./harness/types"
 
 const GEMINI_OPENAI_BASE_URL =
@@ -22,6 +21,7 @@ export class AgentOrchestrator {
   private pendingUserPrompt: string | undefined
   private pendingAttachmentPaths: string[] = []
   private isProcessing = false
+  private registrySynced = false
 
   constructor(deps: IProcessingHelperDeps) {
     this.deps = deps
@@ -58,7 +58,6 @@ export class AgentOrchestrator {
         baseURL: GEMINI_OPENAI_BASE_URL
       })
     } else if (config.apiProvider === "openai") {
-      // 사내 게이트웨이 URL(.env OPENAI_BASE_URL)이 있으면 그쪽으로 전송
       this.openaiClient = new OpenAI({
         apiKey: config.apiKey,
         baseURL: getOpenAIBaseUrl()
@@ -67,6 +66,22 @@ export class AgentOrchestrator {
       this.openaiClient = null
     }
     harnessRunner.setClient(this.openaiClient)
+  }
+
+  /** 웹 레지스트리에서 에이전트 sync (실패해도 로컬 harness로 계속) */
+  private async ensureWebAgentsSynced(): Promise<void> {
+    if (this.registrySynced) return
+    try {
+      const result = await syncAgentsFromWeb()
+      if (result.success) {
+        console.log(`[AgentOrchestrator] Synced agents: ${result.synced.join(", ")}`)
+        this.registrySynced = true
+      } else {
+        console.warn(`[AgentOrchestrator] Web sync skipped: ${result.error}`)
+      }
+    } catch (err) {
+      console.warn("[AgentOrchestrator] Web sync failed:", err)
+    }
   }
 
   public async processScreenshots(): Promise<void> {
@@ -97,12 +112,6 @@ export class AgentOrchestrator {
       return
     }
 
-    // PoC: 스크린샷이 있으면 로컬 OCR만 실행 (LLM 미사용)
-    if (isPocOcrMode() && existingScreenshots.length > 0) {
-      await this.processWithLocalOcr(existingScreenshots)
-      return
-    }
-
     if (!this.openaiClient) {
       this.initializeAIClient()
       if (!this.openaiClient) {
@@ -115,6 +124,8 @@ export class AgentOrchestrator {
     mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
 
     try {
+      await this.ensureWebAgentsSynced()
+
       this.currentAbortController = new AbortController()
       const { signal } = this.currentAbortController
 
@@ -151,70 +162,6 @@ export class AgentOrchestrator {
         return
       }
       const message = error instanceof Error ? error.message : String(error)
-      mainWindow.webContents.send(
-        this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-        message
-      )
-      this.deps.setView("queue")
-    } finally {
-      this.currentAbortController = null
-      this.isProcessing = false
-    }
-  }
-
-  /**
-   * PoC OCR 파이프라인:
-   * 1) 스크린샷에서 로컬 OCR로 텍스트 추출 (이미지는 외부로 전송하지 않음)
-   * 2) OCR 텍스트를 프롬프트로 만들어 사내 OpenAI API(Super Agent)에 전송
-   * 3) Super Agent가 적합한 서브 에이전트로 할당해 실행
-   * API 키가 없으면 OCR 텍스트만 표시 (폴백)
-   */
-  private async processWithLocalOcr(screenshotPaths: string[]): Promise<void> {
-    const mainWindow = this.deps.getMainWindow()
-    if (!mainWindow) return
-
-    this.isProcessing = true
-    const userPrompt = this.pendingUserPrompt
-    this.pendingUserPrompt = undefined
-    this.pendingAttachmentPaths = []
-    mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
-
-    try {
-      console.log("[AgentOrchestrator] PoC local OCR mode")
-      const ocrText = await extractTextFromScreenshotPaths(screenshotPaths)
-
-      if (!this.openaiClient) {
-        this.initializeAIClient()
-      }
-
-      // 폴백: API 키가 없으면 OCR 텍스트만 표시
-      if (!this.openaiClient) {
-        console.log("[AgentOrchestrator] No API key — showing OCR text only")
-        this.handleResult({
-          status: "success",
-          agentId: "local-ocr",
-          message_ko: ocrText,
-          data: { mode: "poc-ocr", screenshotCount: screenshotPaths.length }
-        })
-        return
-      }
-
-      // Super Agent 라우팅: OCR 텍스트 → 사내 OpenAI API → 서브 에이전트 실행
-      console.log("[AgentOrchestrator] Routing OCR text via Super Agent")
-      this.currentAbortController = new AbortController()
-      const { signal } = this.currentAbortController
-
-      const result = await harnessRunner.runFromOcrText(ocrText, userPrompt, signal)
-
-      if (signal.aborted) return
-      this.handleResult(result)
-    } catch (error: unknown) {
-      if (isAbortError(error)) {
-        console.log("[AgentOrchestrator] OCR agent run cancelled")
-        return
-      }
-      const message =
-        error instanceof Error ? error.message : "OCR 처리 중 오류가 발생했습니다"
       mainWindow.webContents.send(
         this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
         message

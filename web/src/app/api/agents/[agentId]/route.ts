@@ -32,7 +32,15 @@ export async function PUT(req: NextRequest, { params }: Params) {
     delegates: Array.isArray(body.delegates) ? body.delegates : existing.delegates,
     model: body.model?.trim() || existing.model,
     classifierModel: body.classifierModel?.trim() || existing.classifierModel,
-    enabled: body.enabled ?? existing.enabled
+    enabled: body.enabled ?? existing.enabled,
+    runtime: body.runtime ?? existing.runtime,
+    templateId: body.templateId ?? existing.templateId,
+    endpointUrl: body.endpointUrl ?? existing.endpointUrl,
+    toolName: body.toolName ?? existing.toolName,
+    toolDescription: body.toolDescription ?? existing.toolDescription,
+    inputSchema: body.inputSchema ?? existing.inputSchema,
+    graph: body.graph ?? existing.graph,
+    description: body.description ?? existing.description
   })
 
   return Response.json(agent)

@@ -10,8 +10,9 @@ interface WelcomeScreenProps {
 const SHORTCUTS = [
   { label: "창 표시/숨김", keys: [`${COMMAND_KEY}+B`] },
   { label: "스크린샷", keys: [`${COMMAND_KEY}+H`] },
-  { label: "Agent 실행", keys: [`${COMMAND_KEY}+↵`] },
+  { label: "Agent 실행", keys: [`${COMMAND_KEY}+Enter`] },
   { label: "모니터 이동", keys: [`${COMMAND_KEY}+\\`] },
+  { label: "창 이동", keys: [`${COMMAND_KEY}+←→↑↓`] },
   { label: "스크린샷 삭제", keys: [`${COMMAND_KEY}+L`] },
   { label: "초기화", keys: [`${COMMAND_KEY}+R`] }
 ]

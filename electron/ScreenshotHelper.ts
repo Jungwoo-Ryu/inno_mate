@@ -21,6 +21,7 @@ export class ScreenshotHelper {
   private readonly tempDir: string;
 
   private view: "queue" | "solutions" | "debug" = "queue";
+  private getActiveDisplay: (() => Electron.Display | null) | null = null;
 
   constructor(view: "queue" | "solutions" | "debug" = "queue") {
     this.view = view;
@@ -41,6 +42,10 @@ export class ScreenshotHelper {
 
     // Clean existing screenshot directories when starting the app
     this.cleanScreenshotDirectories();
+  }
+
+  setActiveDisplayProvider(fn: () => Electron.Display | null): void {
+    this.getActiveDisplay = fn;
   }
 
   private ensureDirectoriesExist(): void {
@@ -154,37 +159,62 @@ export class ScreenshotHelper {
     this.extraScreenshotQueue = [];
   }
 
-  private async captureAllDisplays(): Promise<Buffer[]> {
-    if (process.platform === "darwin") {
+  /**
+   * 앱이 위치한 모니터만 전체 캡처 (듀얼 모니터에서 옆 화면 제외)
+   */
+  private async captureCurrentDisplay(): Promise<Buffer[]> {
+    if (process.platform === "win32") {
+      // Windows: 우선 현재 디스플레이 id로 시도, 실패 시 기존 폴백
       try {
-        const displays = await screenshot.listDisplays()
-        if (displays.length > 1) {
-          console.log(`Capturing ${displays.length} displays on macOS`)
-          const buffers: Buffer[] = []
-          for (const display of displays) {
-            const buffer = await screenshot({
-              screen: display.id,
-              format: "png"
-            })
-            buffers.push(buffer)
-          }
-          return buffers
+        const screenId = await this.resolveScreenshotScreenId()
+        if (screenId != null) {
+          console.log(`[Screenshot] Capturing current display id=${screenId}`)
+          const buffer = await screenshot({ screen: screenId, format: "png" })
+          return [buffer]
         }
       } catch (err) {
-        console.warn("Multi-display capture failed, falling back:", err)
+        console.warn("Current-display capture failed, Windows fallback:", err)
       }
+      return [await this.captureWindowsScreenshot()]
     }
 
-    if (process.platform === "win32") {
-      return [await this.captureWindowsScreenshot()]
+    try {
+      const screenId = await this.resolveScreenshotScreenId()
+      if (screenId != null) {
+        console.log(`[Screenshot] Capturing current display id=${screenId}`)
+        const buffer = await screenshot({ screen: screenId, format: "png" })
+        return [buffer]
+      }
+    } catch (err) {
+      console.warn("Current-display capture failed, falling back:", err)
     }
 
     const buffer = await screenshot({ format: "png" })
     return [buffer]
   }
 
+  /** Electron Display ↔ screenshot-desktop screen id 매칭 (좌→우 정렬 인덱스) */
+  private async resolveScreenshotScreenId(): Promise<number | undefined> {
+    const active = this.getActiveDisplay?.()
+    const listed = await screenshot.listDisplays()
+    if (!listed.length) return undefined
+    if (!active || listed.length === 1) {
+      return Number(listed[0].id)
+    }
+
+    const { screen } = await import("electron")
+    const sortedElectron = [...screen.getAllDisplays()].sort(
+      (a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y
+    )
+    const idx = sortedElectron.findIndex((d) => d.id === active.id)
+    if (idx >= 0 && idx < listed.length) {
+      return Number(listed[idx].id)
+    }
+    return Number(listed[0].id)
+  }
+
   private async captureScreenshot(): Promise<Buffer> {
-    const buffers = await this.captureAllDisplays()
+    const buffers = await this.captureCurrentDisplay()
     return buffers[0]
   }
 
@@ -311,7 +341,7 @@ export class ScreenshotHelper {
 
     const savedPaths: string[] = [];
     try {
-      const screenshotBuffers = await this.captureAllDisplays();
+      const screenshotBuffers = await this.captureCurrentDisplay();
 
       for (const screenshotBuffer of screenshotBuffers) {
         if (!screenshotBuffer || screenshotBuffer.length === 0) {

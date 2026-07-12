@@ -14,7 +14,7 @@ interface QueuePanelProps {
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded-md bg-white/10 border border-white/10 text-[10px] font-medium text-white/75 leading-none">
+    <kbd className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-white/10 bg-white/10 px-1 text-[10px] font-medium leading-none text-white/75">
       {children}
     </kbd>
   )
@@ -37,18 +37,20 @@ function ActionTile({
     <button
       type="button"
       onClick={onClick}
-      className={`flex flex-col items-center justify-center gap-1 py-2.5 px-1 rounded-2xl transition-all active:scale-[0.97] ${
+      className={`flex flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2.5 transition-all active:scale-[0.97] ${
         active
           ? "bg-white/[0.12] ring-1 ring-white/20"
           : "bg-white/[0.06] hover:bg-white/[0.1]"
       }`}
     >
-      <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-white/10">
+      <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/10">
         {icon}
       </span>
-      <span className="text-[11px] font-medium text-white/90 leading-none">{label}</span>
+      <span className="text-[11px] font-medium leading-none text-white/90">
+        {label}
+      </span>
       {subLabel && (
-        <span className="text-[9px] text-white/35 leading-none">{subLabel}</span>
+        <span className="text-[9px] leading-none text-white/35">{subLabel}</span>
       )}
     </button>
   )
@@ -104,7 +106,9 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount }) => {
     try {
       await window.electronAPI.setUserPrompt(trimmed || undefined)
       await window.electronAPI.setAttachments(attachments.map((a) => a.path))
-      const result = await window.electronAPI.triggerProcessScreenshots(trimmed || undefined)
+      const result = await window.electronAPI.triggerProcessScreenshots(
+        trimmed || undefined
+      )
       if (!result.success) {
         showToast("오류", "Agent 실행에 실패했습니다", "error")
       } else {
@@ -129,38 +133,55 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount }) => {
   }
 
   return (
-    <div className="innomate-panel mx-auto">
-      <div className="relative rounded-[22px] border border-white/[0.12] bg-black/70 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
+    <div className="innomate-panel relative mx-auto">
+      <div className="absolute top-3 right-3 z-30">
+        <QueueSettingsMenu screenshotCount={screenshotCount} />
+      </div>
+
+      <div className="relative overflow-hidden rounded-[22px] border border-white/[0.12] bg-black/70 shadow-[0_8px_32px_rgba(0,0,0,0.4)] backdrop-blur-2xl">
         {isRunning && (
           <div className="absolute inset-0 z-20 flex items-center justify-center rounded-[22px] bg-black/60 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-2">
-              <div className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
-              <p className="text-[11px] text-white/60">OCR 텍스트 추출 중…</p>
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+              <p className="text-[11px] text-white/60">Super Agent 실행 중…</p>
             </div>
           </div>
         )}
-        <div className="absolute top-3 right-3 z-10">
-          <QueueSettingsMenu screenshotCount={screenshotCount} />
+
+        {/* 로고 — 상단 중앙 */}
+        <div className="flex flex-col items-center px-3 pt-4 pb-3">
+          <img
+            src="/innomate-icon.png"
+            alt="InnoMate"
+            className="mb-1.5 h-11 w-11 rounded-[14px] object-cover"
+            onError={(e) => {
+              ;(e.target as HTMLImageElement).style.display = "none"
+            }}
+          />
+          <p className="text-[15px] font-semibold tracking-tight text-white">
+            <span className="text-white/90">Inno</span>
+            <span className="text-red-500">Mate</span>
+          </p>
         </div>
 
-        {/* 주요 액션 — 3열 */}
-        <div className="px-3 pt-4 pb-2">
+        {/* 주요 액션 */}
+        <div className="px-3 pb-2">
           <div className="grid grid-cols-3 gap-1.5">
             <ActionTile
-              icon={<Camera className="w-4 h-4 text-white/90" />}
+              icon={<Camera className="h-4 w-4 text-white/90" />}
               label="스크린샷"
               subLabel={`${COMMAND_KEY} H`}
               onClick={handleScreenshot}
             />
             <ActionTile
-              icon={<Bot className="w-4 h-4 text-white/90" />}
+              icon={<Bot className="h-4 w-4 text-white/90" />}
               label="에이전트"
               subLabel="관리"
               onClick={toggleAgents}
               active={showAgents}
             />
             <ActionTile
-              icon={<Plug className="w-4 h-4 text-white/90" />}
+              icon={<Plug className="h-4 w-4 text-white/90" />}
               label="MCP"
               subLabel="연결"
               onClick={toggleMcp}
@@ -169,11 +190,14 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount }) => {
           </div>
         </div>
 
-        <AgentManagerSheet open={showAgents} onClose={() => setShowAgents(false)} />
+        <AgentManagerSheet
+          open={showAgents}
+          onClose={() => setShowAgents(false)}
+        />
         <McpConnectionSheet open={showMcp} onClose={() => setShowMcp(false)} />
 
         {/* 보조 단축키 */}
-        <div className="px-3 pb-2 flex flex-wrap items-center justify-center gap-1.5">
+        <div className="flex flex-wrap items-center justify-center gap-1.5 px-3 pb-2">
           {[
             { label: "실행", keys: [COMMAND_KEY, "↵"] },
             { label: "창 숨김", keys: [COMMAND_KEY, "B"] },
@@ -183,7 +207,7 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount }) => {
           ].map(({ label, keys }) => (
             <span
               key={label}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-white/[0.05] text-[10px] text-white/45"
+              className="inline-flex items-center gap-1 rounded-full bg-white/[0.05] px-2 py-1 text-[10px] text-white/45"
             >
               {label}
               {keys.map((k) => (
@@ -192,14 +216,14 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount }) => {
             </span>
           ))}
           {screenshotCount > 0 && (
-            <span className="inline-flex items-center px-2 py-1 rounded-full bg-emerald-500/10 text-[10px] text-emerald-400/90">
+            <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-400/90">
               {screenshotCount}장 캡처
             </span>
           )}
         </div>
 
         {/* 채팅 입력 */}
-        <div className="px-3 pb-3 border-t border-white/[0.06] pt-3">
+        <div className="border-t border-white/[0.06] px-3 pb-3 pt-3">
           <ChatComposer
             value={prompt}
             onChange={setPrompt}

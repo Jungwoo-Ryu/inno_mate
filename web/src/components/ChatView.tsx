@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { ArrowUp, Bot, FileText, Image as ImageIcon, Paperclip, Square, X } from "lucide-react"
 import type { AgentRecord, ChatAttachment, ChatMessage } from "@/lib/types"
 import { fileToAttachment, formatBytes } from "@/lib/clientAttachments"
+import type { ClientStreamEvent, WorkflowRunState } from "@/lib/workflow/types"
+import WorkflowCard, { applyWorkflowEvent } from "@/components/workflow/WorkflowCard"
 
 interface ChatViewProps {
   sessionId?: string
@@ -15,6 +17,33 @@ interface DisplayMessage {
   role: "user" | "assistant"
   content: string
   attachments?: Pick<ChatAttachment, "name" | "mimeType" | "size" | "kind">[]
+  workflow?: WorkflowRunState | null
+}
+
+async function readSseStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onEvent: (event: ClientStreamEvent) => void
+) {
+  const decoder = new TextDecoder()
+  let buffer = ""
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split("\n\n")
+    buffer = parts.pop() ?? ""
+    for (const part of parts) {
+      const line = part.split("\n").find((l) => l.startsWith("data:"))
+      if (!line) continue
+      const raw = line.replace(/^data:\s*/, "").trim()
+      if (!raw) continue
+      try {
+        onEvent(JSON.parse(raw) as ClientStreamEvent)
+      } catch {
+        // ignore malformed
+      }
+    }
+  }
 }
 
 export default function ChatView({
@@ -73,6 +102,71 @@ export default function ChatView({
     setIsStreaming(false)
   }
 
+  const patchLastAssistant = (updater: (msg: DisplayMessage) => DisplayMessage) => {
+    setMessages((prev) => {
+      const next = [...prev]
+      const last = next[next.length - 1]
+      if (last?.role === "assistant") {
+        next[next.length - 1] = updater(last)
+      }
+      return next
+    })
+  }
+
+  const handleResume = async (runId: string, fields: Record<string, string>) => {
+    const res = await fetch(`/api/runs/${runId}/resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields })
+    })
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as { error?: string } | null
+      throw new Error(data?.error ?? "재개 실패")
+    }
+
+    const contentType = res.headers.get("content-type") || ""
+    if (contentType.includes("text/event-stream") && res.body) {
+      await readSseStream(res.body.getReader(), (event) => {
+        if (event.type === "workflow") {
+          patchLastAssistant((msg) => ({
+            ...msg,
+            workflow: applyWorkflowEvent(msg.workflow ?? null, event.event)
+          }))
+        }
+        if (event.type === "token") {
+          patchLastAssistant((msg) => ({
+            ...msg,
+            content: msg.content + event.text
+          }))
+        }
+      })
+      return
+    }
+
+    const data = (await res.json()) as {
+      events?: Parameters<typeof applyWorkflowEvent>[1][]
+      status?: string
+    }
+    if (data.events) {
+      patchLastAssistant((msg) => {
+        let wf = msg.workflow ?? null
+        for (const ev of data.events!) {
+          wf = applyWorkflowEvent(wf, ev)
+        }
+        return {
+          ...msg,
+          workflow: wf,
+          // 결과는 WorkflowCard 안에서만 표시 (말풍선 content 중복 방지)
+          content:
+            wf?.result?.message_ko && data.status === "completed"
+              ? ""
+              : msg.content ||
+                (data.status === "paused" ? "추가 정보가 필요합니다." : msg.content)
+        }
+      })
+    }
+  }
+
   const send = async () => {
     const text = input.trim()
     if ((!text && attachments.length === 0) || isStreaming) return
@@ -91,7 +185,7 @@ export default function ChatView({
           kind
         }))
       },
-      { role: "assistant", content: "" }
+      { role: "assistant", content: "", workflow: null }
     ])
     setInput("")
     setAttachments([])
@@ -127,28 +221,42 @@ export default function ChatView({
       const reader = res.body?.getReader()
       if (!reader) throw new Error("응답 스트림을 열 수 없습니다")
 
-      const decoder = new TextDecoder()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const chunk = decoder.decode(value, { stream: true })
-        setMessages((prev) => {
-          const next = [...prev]
-          const last = next[next.length - 1]
-          if (last?.role === "assistant") {
-            next[next.length - 1] = { ...last, content: last.content + chunk }
-          }
-          return next
-        })
-      }
+      await readSseStream(reader, (event) => {
+        if (event.type === "token") {
+          patchLastAssistant((msg) => ({
+            ...msg,
+            content: msg.content + event.text
+          }))
+        }
+        if (event.type === "workflow") {
+          patchLastAssistant((msg) => ({
+            ...msg,
+            workflow: applyWorkflowEvent(msg.workflow ?? null, event.event)
+          }))
+        }
+        if (event.type === "error") {
+          setError(event.message)
+        }
+        if (event.type === "done" && event.status === "paused") {
+          patchLastAssistant((msg) => ({
+            ...msg,
+            content:
+              msg.content ||
+              "필수 정보가 부족해 워크플로가 일시 중지되었습니다."
+          }))
+        }
+      })
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
         const msg = err instanceof Error ? err.message : "오류가 발생했습니다"
         setError(msg)
         setMessages((prev) => {
-          // 빈 assistant placeholder 제거
           const next = [...prev]
-          if (next[next.length - 1]?.role === "assistant" && !next[next.length - 1].content) {
+          if (
+            next[next.length - 1]?.role === "assistant" &&
+            !next[next.length - 1].content &&
+            !next[next.length - 1].workflow
+          ) {
             next.pop()
           }
           return next
@@ -171,7 +279,6 @@ export default function ChatView({
 
   return (
     <div className="glass-panel flex h-full flex-col overflow-hidden">
-      {/* 헤더: 에이전트 선택 */}
       <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-3">
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-white/50" />
@@ -185,6 +292,7 @@ export default function ChatView({
             {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agent.name}
+                {agent.runtime === "databricks" ? " · DBX" : ""}
               </option>
             ))}
           </select>
@@ -194,7 +302,6 @@ export default function ChatView({
         </span>
       </div>
 
-      {/* 메시지 목록 */}
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
         {isEmpty ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
@@ -218,9 +325,9 @@ export default function ChatView({
                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words ${
+                  className={`max-w-[95%] rounded-2xl px-4 py-2.5 text-[13.5px] leading-relaxed break-words ${
                     msg.role === "user"
-                      ? "bg-white/[0.12] text-white"
+                      ? "bg-white/[0.12] text-white whitespace-pre-wrap"
                       : "glass-inset text-white/90"
                   }`}
                 >
@@ -241,12 +348,32 @@ export default function ChatView({
                       ))}
                     </div>
                   )}
-                  {msg.content ||
-                    (msg.role === "assistant" && isStreaming && i === messages.length - 1 ? (
-                      <span className="inline-block h-4 w-2 animate-pulse rounded-sm bg-white/50" />
-                    ) : (
-                      msg.content
-                    ))}
+                  {msg.workflow && (
+                    <WorkflowCard
+                      state={msg.workflow}
+                      onResume={async (runId, fields) => {
+                        try {
+                          await handleResume(runId, fields)
+                        } catch (err) {
+                          setError(
+                            err instanceof Error ? err.message : "재개 실패"
+                          )
+                        }
+                      }}
+                    />
+                  )}
+                  {msg.content &&
+                  !(
+                    msg.workflow?.status === "completed" &&
+                    msg.workflow?.result?.message_ko
+                  ) ? (
+                    <p className="mt-1 whitespace-pre-wrap">{msg.content}</p>
+                  ) : msg.role === "assistant" &&
+                    isStreaming &&
+                    i === messages.length - 1 &&
+                    !msg.workflow ? (
+                    <span className="inline-block h-4 w-2 animate-pulse rounded-sm bg-white/50" />
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -255,17 +382,14 @@ export default function ChatView({
         )}
       </div>
 
-      {/* 오류 */}
       {error && (
         <div className="mx-5 mb-2 rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">
           {error}
         </div>
       )}
 
-      {/* 입력 영역 */}
       <div className="border-t border-white/[0.07] p-4">
         <div className="mx-auto max-w-[760px]">
-          {/* 첨부 미리보기 */}
           {attachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {attachments.map((att, i) => (
@@ -306,9 +430,9 @@ export default function ChatView({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="flex-shrink-0 rounded-xl p-2 text-white/45 transition-colors hover:bg-white/10 hover:text-white/80"
-              title="파일 첨부 (모든 형식)"
+              title="파일 첨부"
             >
-              <Paperclip className="h-4.5 w-4.5 h-[18px] w-[18px]" />
+              <Paperclip className="h-[18px] w-[18px]" />
             </button>
             <textarea
               ref={textareaRef}
@@ -343,9 +467,6 @@ export default function ChatView({
               </button>
             )}
           </div>
-          <p className="mt-2 text-center text-[10.5px] text-white/25">
-            InnoMate는 사내 OpenAI 게이트웨이를 통해 응답합니다
-          </p>
         </div>
       </div>
     </div>

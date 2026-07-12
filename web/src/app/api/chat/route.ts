@@ -1,15 +1,18 @@
 import { NextRequest } from "next/server"
 import { v4 as uuidv4 } from "uuid"
-import type OpenAI from "openai"
-import { getOpenAIClient, getDefaultModel } from "@/lib/openai"
+import { getDefaultModel, resolveOpenAICredentials } from "@/lib/openai"
 import {
   addMessage,
   createSession,
   getAgent,
   getSession,
-  listMessages
+  listAgents,
+  listMessages,
+  upsertRun
 } from "@/lib/db"
+import { runWebSuperAgent } from "@/lib/superAgent/run"
 import type { ChatAttachment } from "@/lib/types"
+import type { ClientStreamEvent } from "@/lib/workflow/types"
 
 export const runtime = "nodejs"
 
@@ -20,43 +23,8 @@ interface ChatRequestBody {
   attachments?: ChatAttachment[]
 }
 
-const MAX_INLINE_TEXT_CHARS = 30_000
-
-function buildUserContent(
-  message: string,
-  attachments: ChatAttachment[]
-): string | OpenAI.Chat.ChatCompletionContentPart[] {
-  if (attachments.length === 0) return message
-
-  const parts: OpenAI.Chat.ChatCompletionContentPart[] = [
-    { type: "text", text: message || "(첨부 파일을 확인해 주세요)" }
-  ]
-
-  for (const att of attachments) {
-    if (att.kind === "text" && att.content) {
-      const clipped =
-        att.content.length > MAX_INLINE_TEXT_CHARS
-          ? `${att.content.slice(0, MAX_INLINE_TEXT_CHARS)}\n...(잘림)`
-          : att.content
-      parts.push({
-        type: "text",
-        text: `\n\n[첨부 파일: ${att.name}]\n${clipped}`
-      })
-    } else if (att.kind === "image" && att.content) {
-      parts.push({ type: "text", text: `\n\n[첨부 이미지: ${att.name}]` })
-      parts.push({
-        type: "image_url",
-        image_url: { url: att.content, detail: "high" }
-      })
-    } else {
-      parts.push({
-        type: "text",
-        text: `\n\n[첨부 파일(내용 미포함): ${att.name} · ${att.mimeType} · ${att.size} bytes]`
-      })
-    }
-  }
-
-  return parts
+function encodeSse(event: ClientStreamEvent): string {
+  return `data: ${JSON.stringify(event)}\n\n`
 }
 
 export async function POST(req: NextRequest) {
@@ -73,10 +41,24 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "메시지를 입력하세요" }, { status: 400 })
   }
 
+  let credentials: ReturnType<typeof resolveOpenAICredentials>
+  try {
+    credentials = resolveOpenAICredentials()
+  } catch (err) {
+    return Response.json(
+      {
+        error:
+          err instanceof Error
+            ? err.message
+            : "OpenAI API Key가 없습니다. 사이드바 API 설정에서 등록하세요."
+      },
+      { status: 500 }
+    )
+  }
+
   const agentId = body.agentId || "super"
   const agent = getAgent(agentId)
 
-  // 세션 확보 (없으면 생성, 제목 = 첫 메시지 요약)
   let sessionId = body.sessionId
   if (!sessionId || !getSession(sessionId)) {
     sessionId = uuidv4()
@@ -92,71 +74,97 @@ export async function POST(req: NextRequest) {
 
   const systemPrompt =
     agent?.guide?.trim() ||
-    "You are InnoMate, LG Innotek's AI Super Agent. Respond in Korean (존댓말)."
+    `You are InnoMate Super Agent for LG Innotek.
+Delegate HR/G-portal tasks to registered Databricks tools when available.
+Respond in Korean (존댓말).`
 
-  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: systemPrompt },
-    ...history.map((m) => ({
-      role: m.role,
-      content: m.content
-    })),
-    { role: "user", content: buildUserContent(message, attachments) }
-  ]
+  const imageDataUrls = attachments
+    .filter((a) => a.kind === "image" && a.content)
+    .map((a) => a.content as string)
 
-  let client: ReturnType<typeof getOpenAIClient>
-  try {
-    client = getOpenAIClient()
-  } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : "OpenAI 설정 오류" },
-      { status: 500 }
-    )
-  }
+  const registryAgents = listAgents(true)
+  const encoder = new TextEncoder()
+  const capturedSessionId = sessionId
+  const messageId = uuidv4()
 
-  const model = agent?.model || getDefaultModel()
+  const readable = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const emit = (event: ClientStreamEvent) => {
+        controller.enqueue(encoder.encode(encodeSse(event)))
 
-  try {
-    const stream = await client.chat.completions.create({
-      model,
-      messages,
-      stream: true
-    })
-
-    const encoder = new TextEncoder()
-    let assistantText = ""
-    const capturedSessionId = sessionId
-
-    const readable = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        try {
-          for await (const chunk of stream) {
-            const delta = chunk.choices[0]?.delta?.content
-            if (delta) {
-              assistantText += delta
-              controller.enqueue(encoder.encode(delta))
-            }
+        if (event.type === "workflow") {
+          const we = event.event
+          if (we.type === "run_paused") {
+            upsertRun({
+              id: we.runId,
+              sessionId: capturedSessionId,
+              agentId: we.agentId,
+              status: "paused",
+              missingFields: we.missingFields,
+              collectedFields: we.collectedFields
+            })
           }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "스트리밍 오류"
-          controller.enqueue(encoder.encode(`\n\n[오류] ${msg}`))
-        } finally {
-          if (assistantText.trim()) {
-            addMessage(uuidv4(), capturedSessionId, "assistant", assistantText)
+          if (we.type === "run_completed") {
+            upsertRun({
+              id: we.runId,
+              sessionId: capturedSessionId,
+              agentId: agentId,
+              status: "completed",
+              resultJson: JSON.stringify(we.result)
+            })
           }
-          controller.close()
         }
       }
-    })
 
-    return new Response(readable, {
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-cache",
-        "X-Session-Id": sessionId
+      try {
+        const result = await runWebSuperAgent({
+          apiKey: credentials.apiKey,
+          baseURL: credentials.baseURL,
+          model: agent?.model || credentials.model || getDefaultModel(),
+          systemPrompt,
+          message,
+          imageDataUrls,
+          history: history.map((m) => ({ role: m.role, content: m.content })),
+          agents: registryAgents,
+          databricksToken:
+            process.env.DATABRICKS_TOKEN ||
+            process.env.DATABRICKS_CLIENT_SECRET ||
+            undefined,
+          emit
+        })
+
+        if (result.message.trim()) {
+          addMessage(messageId, capturedSessionId, "assistant", result.message)
+        }
+
+        emit({
+          type: "done",
+          sessionId: capturedSessionId,
+          messageId,
+          status: result.status,
+          runId: result.runId
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "실행 오류"
+        emit({ type: "error", message: msg })
+        emit({
+          type: "done",
+          sessionId: capturedSessionId,
+          messageId,
+          status: "error"
+        })
+      } finally {
+        controller.close()
       }
-    })
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "OpenAI 호출 실패"
-    return Response.json({ error: msg }, { status: 502 })
-  }
+    }
+  })
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Session-Id": sessionId
+    }
+  })
 }

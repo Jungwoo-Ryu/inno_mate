@@ -58,6 +58,7 @@ export interface ElectronAPI {
   onDeleteLastScreenshot: (callback: () => void) => () => void
   deleteLastScreenshot: () => Promise<unknown>
   onShowSettings: (callback: () => void) => () => void
+  openSettingsPortal: () => Promise<{ success: boolean; error?: string }>
 }
 
 declare global {

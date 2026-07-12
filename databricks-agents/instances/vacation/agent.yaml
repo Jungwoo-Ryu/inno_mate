@@ -1,0 +1,35 @@
+templateId: hr_form_v1
+agentId: vacation
+name: 휴가 신청
+description: G-portal 휴가/연차 신청을 처리합니다. 시작일·종료일·휴가유형이 필요합니다.
+toolName: run_vacation_agent
+runtime: databricks
+endpointUrl: ""  # 배포 후 웹 /agents에 등록
+inputSchema:
+  fields:
+    - key: startDate
+      label: 시작일
+      type: date
+      required: true
+    - key: endDate
+      label: 종료일
+      type: date
+      required: true
+    - key: leaveType
+      label: 휴가 유형
+      type: enum
+      required: true
+      enumValues: [연차, 반차, 병가, 경조사]
+graph:
+  nodes:
+    - { id: intake, label: Intake }
+    - { id: validate, label: Validate }
+    - { id: await_input, label: Await }
+    - { id: execute, label: Execute }
+    - { id: confirm, label: Confirm }
+  edges:
+    - { from: intake, to: validate, kind: always }
+    - { from: validate, to: await_input, kind: conditional }
+    - { from: validate, to: execute, kind: conditional }
+    - { from: await_input, to: validate, kind: always }
+    - { from: execute, to: confirm, kind: always }

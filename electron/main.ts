@@ -18,8 +18,8 @@ const MIN_WINDOW_WIDTH = 400
 const MIN_WINDOW_HEIGHT = 280
 const DEFAULT_WINDOW_WIDTH = 480
 const DEFAULT_WINDOW_HEIGHT = 320
-const SETTINGS_MIN_WIDTH = 480
-const SETTINGS_MIN_HEIGHT = 680
+const SETTINGS_MIN_WIDTH = 400
+const SETTINGS_MIN_HEIGHT = 440
 
 // Application State
 const state = {
@@ -129,6 +129,10 @@ export interface IIpcHandlerDeps {
 // Initialize helpers
 function initializeHelpers() {
   state.screenshotHelper = new ScreenshotHelper(state.view)
+  state.screenshotHelper.setActiveDisplayProvider(() => {
+    if (!state.mainWindow || state.mainWindow.isDestroyed()) return null
+    return getDisplayForWindow()
+  })
   state.processingHelper = new AgentOrchestrator({
     getScreenshotHelper,
     getMainWindow,

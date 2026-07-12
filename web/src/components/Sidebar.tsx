@@ -5,6 +5,7 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { Bot, MessageSquarePlus, Plug, Trash2 } from "lucide-react"
 import type { ChatSession } from "@/lib/types"
+import ApiSettingsPanel from "@/components/ApiSettingsPanel"
 
 export default function Sidebar() {
   const pathname = usePathname()
@@ -122,6 +123,7 @@ export default function Sidebar() {
             </Link>
           )
         })}
+        <ApiSettingsPanel />
       </div>
     </aside>
   )

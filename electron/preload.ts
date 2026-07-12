@@ -107,6 +107,7 @@ const electronAPI = {
     ipcRenderer.on("show-settings-dialog", subscription)
     return () => ipcRenderer.removeListener("show-settings-dialog", subscription)
   },
+  openSettingsPortal: () => ipcRenderer.invoke("open-settings-portal"),
   checkApiKey: () => ipcRenderer.invoke("check-api-key"),
   validateApiKey: (apiKey: string) =>
     ipcRenderer.invoke("validate-api-key", apiKey),

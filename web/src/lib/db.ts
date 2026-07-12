@@ -61,10 +61,99 @@ function getDb(): Database.Database {
       enabled INTEGER NOT NULL DEFAULT 1,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS runs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT,
+      agent_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      missing_fields_json TEXT,
+      collected_fields_json TEXT,
+      result_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `)
 
+  migrateAgentColumns(db)
   seedAgentsIfEmpty(db)
+  ensureVacationHitlDemo(db)
   return db
+}
+
+/** 데모용: vacation 에이전트에 HITL inputSchema + databricks runtime 보강 */
+function ensureVacationHitlDemo(database: Database.Database): void {
+  const row = database.prepare("SELECT * FROM agents WHERE id = ?").get("vacation") as
+    | Record<string, unknown>
+    | undefined
+  if (!row) return
+  if (row.input_schema_json) return
+
+  const inputSchema = {
+    fields: [
+      { key: "startDate", label: "시작일", type: "date", required: true },
+      { key: "endDate", label: "종료일", type: "date", required: true },
+      {
+        key: "leaveType",
+        label: "휴가 유형",
+        type: "enum",
+        required: true,
+        enumValues: ["연차", "반차", "병가", "경조사"]
+      }
+    ]
+  }
+  const graph = {
+    nodes: [
+      { id: "intake", label: "Intake", description: "요청·컨텍스트 수집" },
+      { id: "validate", label: "Validate", description: "필수 입력 검증" },
+      { id: "await_input", label: "Await", description: "누락 필드 대기" },
+      { id: "execute", label: "Execute", description: "업무 실행" },
+      { id: "confirm", label: "Confirm", description: "결과 확인" }
+    ],
+    edges: [
+      { from: "intake", to: "validate", kind: "always" },
+      { from: "validate", to: "await_input", kind: "conditional" },
+      { from: "validate", to: "execute", kind: "conditional" },
+      { from: "await_input", to: "validate", kind: "always" },
+      { from: "execute", to: "confirm", kind: "always" }
+    ]
+  }
+
+  database
+    .prepare(
+      `UPDATE agents SET
+         runtime = 'databricks',
+         tool_name = COALESCE(tool_name, 'run_vacation_agent'),
+         tool_description = COALESCE(tool_description, '휴가/연차 신청을 처리합니다'),
+         input_schema_json = ?,
+         graph_json = ?,
+         description = COALESCE(description, 'G-portal 휴가 신청'),
+         updated_at = ?
+       WHERE id = 'vacation'`
+    )
+    .run(JSON.stringify(inputSchema), JSON.stringify(graph), new Date().toISOString())
+}
+
+function migrateAgentColumns(database: Database.Database): void {
+  const cols = database.prepare("PRAGMA table_info(agents)").all() as Array<{ name: string }>
+  const names = new Set(cols.map((c) => c.name))
+  const add = (col: string, ddl: string) => {
+    if (!names.has(col)) database.exec(`ALTER TABLE agents ADD COLUMN ${ddl}`)
+  }
+  add("runtime", "runtime TEXT NOT NULL DEFAULT 'local'")
+  add("template_id", "template_id TEXT")
+  add("endpoint_url", "endpoint_url TEXT")
+  add("tool_name", "tool_name TEXT")
+  add("tool_description", "tool_description TEXT")
+  add("input_schema_json", "input_schema_json TEXT")
+  add("graph_json", "graph_json TEXT")
+  add("description", "description TEXT")
 }
 
 /** 저장소가 비어 있으면 저장소 루트 agents/ 폴더에서 기본 에이전트 seed */
@@ -225,13 +314,23 @@ export function upsertAgent(agent: Omit<AgentRecord, "updatedAt">): AgentRecord 
   const now = new Date().toISOString()
   getDb()
     .prepare(
-      `INSERT INTO agents (id, name, version, guide, tools_json, delegates_json, model, classifier_model, enabled, updated_at)
-       VALUES (@id, @name, @version, @guide, @tools, @delegates, @model, @classifierModel, @enabled, @now)
+      `INSERT INTO agents (
+         id, name, version, guide, tools_json, delegates_json, model, classifier_model,
+         enabled, updated_at, runtime, template_id, endpoint_url, tool_name, tool_description,
+         input_schema_json, graph_json, description
+       ) VALUES (
+         @id, @name, @version, @guide, @tools, @delegates, @model, @classifierModel,
+         @enabled, @now, @runtime, @templateId, @endpointUrl, @toolName, @toolDescription,
+         @inputSchema, @graph, @description
+       )
        ON CONFLICT(id) DO UPDATE SET
          name = @name, version = @version, guide = @guide,
          tools_json = @tools, delegates_json = @delegates,
          model = @model, classifier_model = @classifierModel,
-         enabled = @enabled, updated_at = @now`
+         enabled = @enabled, updated_at = @now,
+         runtime = @runtime, template_id = @templateId, endpoint_url = @endpointUrl,
+         tool_name = @toolName, tool_description = @toolDescription,
+         input_schema_json = @inputSchema, graph_json = @graph, description = @description`
     )
     .run({
       id: agent.id,
@@ -243,9 +342,17 @@ export function upsertAgent(agent: Omit<AgentRecord, "updatedAt">): AgentRecord 
       model: agent.model,
       classifierModel: agent.classifierModel,
       enabled: agent.enabled ? 1 : 0,
-      now
+      now,
+      runtime: agent.runtime || "local",
+      templateId: agent.templateId ?? null,
+      endpointUrl: agent.endpointUrl ?? null,
+      toolName: agent.toolName ?? null,
+      toolDescription: agent.toolDescription ?? null,
+      inputSchema: agent.inputSchema ? JSON.stringify(agent.inputSchema) : null,
+      graph: agent.graph ? JSON.stringify(agent.graph) : null,
+      description: agent.description ?? null
     })
-  return { ...agent, updatedAt: now }
+  return { ...agent, runtime: agent.runtime || "local", updatedAt: now }
 }
 
 export function deleteAgent(id: string): void {
@@ -263,7 +370,17 @@ function rowToAgent(row: Record<string, unknown>): AgentRecord {
     model: row.model as string,
     classifierModel: row.classifier_model as string,
     enabled: Boolean(row.enabled),
-    updatedAt: row.updated_at as string
+    updatedAt: row.updated_at as string,
+    runtime: ((row.runtime as string) || "local") as AgentRecord["runtime"],
+    templateId: (row.template_id as string) || undefined,
+    endpointUrl: (row.endpoint_url as string) || undefined,
+    toolName: (row.tool_name as string) || undefined,
+    toolDescription: (row.tool_description as string) || undefined,
+    inputSchema: row.input_schema_json
+      ? JSON.parse(row.input_schema_json as string)
+      : undefined,
+    graph: row.graph_json ? JSON.parse(row.graph_json as string) : undefined,
+    description: (row.description as string) || undefined
   }
 }
 
@@ -306,4 +423,124 @@ export function upsertMcpServer(server: Omit<McpServerRecord, "updatedAt">): Mcp
 
 export function deleteMcpServer(id: string): void {
   getDb().prepare("DELETE FROM mcp_servers WHERE id = ?").run(id)
+}
+
+// ---------- Runs (HITL) ----------
+
+export function upsertRun(run: {
+  id: string
+  sessionId: string
+  agentId: string
+  status: "running" | "paused" | "completed" | "error"
+  missingFields?: unknown
+  collectedFields?: unknown
+  resultJson?: string
+}): void {
+  const now = new Date().toISOString()
+  getDb()
+    .prepare(
+      `INSERT INTO runs (
+         id, session_id, agent_id, status, missing_fields_json, collected_fields_json, result_json, created_at, updated_at
+       ) VALUES (@id, @sessionId, @agentId, @status, @missing, @collected, @result, @now, @now)
+       ON CONFLICT(id) DO UPDATE SET
+         status = @status,
+         missing_fields_json = @missing,
+         collected_fields_json = @collected,
+         result_json = COALESCE(@result, result_json),
+         updated_at = @now`
+    )
+    .run({
+      id: run.id,
+      sessionId: run.sessionId,
+      agentId: run.agentId,
+      status: run.status,
+      missing: run.missingFields ? JSON.stringify(run.missingFields) : null,
+      collected: run.collectedFields ? JSON.stringify(run.collectedFields) : null,
+      result: run.resultJson ?? null,
+      now
+    })
+}
+
+export function getRun(id: string): {
+  id: string
+  sessionId: string
+  agentId: string
+  status: string
+  missingFields?: unknown
+  collectedFields?: Record<string, unknown>
+  resultJson?: string
+} | null {
+  const row = getDb().prepare("SELECT * FROM runs WHERE id = ?").get(id) as
+    | Record<string, unknown>
+    | undefined
+  if (!row) return null
+  return {
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    agentId: row.agent_id as string,
+    status: row.status as string,
+    missingFields: row.missing_fields_json
+      ? JSON.parse(row.missing_fields_json as string)
+      : undefined,
+    collectedFields: row.collected_fields_json
+      ? JSON.parse(row.collected_fields_json as string)
+      : undefined,
+    resultJson: (row.result_json as string) || undefined
+  }
+}
+
+// ---------- App settings (OpenAI URL / Key 등) ----------
+
+export function getSetting(key: string): string | null {
+  const row = getDb()
+    .prepare("SELECT value FROM app_settings WHERE key = ?")
+    .get(key) as { value: string } | undefined
+  return row?.value ?? null
+}
+
+export function setSetting(key: string, value: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+    )
+    .run(key, value, new Date().toISOString())
+}
+
+export function getOpenAISettings(): {
+  baseUrl: string
+  apiKey: string
+  model: string
+  hasApiKey: boolean
+} {
+  const baseUrl =
+    getSetting("openai_base_url")?.trim() ||
+    process.env.OPENAI_BASE_URL?.trim() ||
+    ""
+  const apiKey =
+    getSetting("openai_api_key")?.trim() ||
+    process.env.OPENAI_API_KEY?.trim() ||
+    ""
+  const model =
+    getSetting("openai_model")?.trim() ||
+    process.env.OPENAI_MODEL?.trim() ||
+    "gpt-5.5"
+  return { baseUrl, apiKey, model, hasApiKey: Boolean(apiKey) }
+}
+
+export function saveOpenAISettings(input: {
+  baseUrl?: string
+  apiKey?: string
+  model?: string
+}): void {
+  if (input.baseUrl !== undefined) {
+    setSetting("openai_base_url", input.baseUrl.trim())
+  }
+  if (input.apiKey !== undefined && input.apiKey.trim()) {
+    // 빈 문자열이면 기존 키 유지 (UI에서 •••• 마스킹 후 미변경)
+    setSetting("openai_api_key", input.apiKey.trim())
+  }
+  if (input.model !== undefined) {
+    setSetting("openai_model", input.model.trim() || "gpt-5.5")
+  }
 }

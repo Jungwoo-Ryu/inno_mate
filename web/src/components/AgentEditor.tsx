@@ -22,6 +22,14 @@ export default function AgentEditor({ agent, onClose }: AgentEditorProps) {
   const [delegates, setDelegates] = useState(agent?.delegates.join(", ") ?? "")
   const [guide, setGuide] = useState(agent?.guide ?? "")
   const [enabled, setEnabled] = useState(agent?.enabled ?? true)
+  const [runtime, setRuntime] = useState<"local" | "databricks">(
+    agent?.runtime ?? "local"
+  )
+  const [endpointUrl, setEndpointUrl] = useState(agent?.endpointUrl ?? "")
+  const [toolName, setToolName] = useState(agent?.toolName ?? "")
+  const [toolDescription, setToolDescription] = useState(
+    agent?.toolDescription ?? ""
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -48,7 +56,11 @@ export default function AgentEditor({ agent, onClose }: AgentEditorProps) {
           .map((d) => d.trim())
           .filter(Boolean),
         guide,
-        enabled
+        enabled,
+        runtime,
+        endpointUrl: endpointUrl.trim() || undefined,
+        toolName: toolName.trim() || undefined,
+        toolDescription: toolDescription.trim() || undefined
       }
 
       const res = await fetch(isNew ? "/api/agents" : `/api/agents/${agent.id}`, {
@@ -165,14 +177,65 @@ export default function AgentEditor({ agent, onClose }: AgentEditorProps) {
                 className="h-4 w-4 accent-emerald-500"
               />
               <span className="text-[13px] text-white/70">
-                활성화 (데스크톱 앱에 동기화)
+                활성화 (Desktop·CLI에 동기화)
               </span>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-4">
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-white/60">
+                런타임
+              </span>
+              <select
+                value={runtime}
+                onChange={(e) =>
+                  setRuntime(e.target.value as "local" | "databricks")
+                }
+                className="glass-input w-full"
+              >
+                <option value="local">local (Electron harness)</option>
+                <option value="databricks">databricks (endpoint tool)</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-white/60">
+                Tool 이름
+              </span>
+              <input
+                value={toolName}
+                onChange={(e) => setToolName(e.target.value)}
+                placeholder="run_vacation_agent"
+                className="glass-input w-full font-mono text-[12px]"
+              />
+            </label>
+            <label className="col-span-2 block">
+              <span className="mb-1.5 block text-[12px] font-medium text-white/60">
+                Databricks Endpoint URL
+              </span>
+              <input
+                value={endpointUrl}
+                onChange={(e) => setEndpointUrl(e.target.value)}
+                placeholder="https://….databricksapps.com/responses"
+                className="glass-input w-full font-mono text-[12px]"
+              />
+            </label>
+            <label className="col-span-2 block">
+              <span className="mb-1.5 block text-[12px] font-medium text-white/60">
+                Tool 설명 (Super Agent용)
+              </span>
+              <input
+                value={toolDescription}
+                onChange={(e) => setToolDescription(e.target.value)}
+                placeholder="휴가/연차 신청을 Databricks 에이전트에 위임"
+                className="glass-input w-full"
+              />
             </label>
           </div>
 
           <label className="block">
             <span className="mb-1.5 block text-[12px] font-medium text-white/60">
-              도구 목록 (줄바꿈으로 구분 — 실행 구현은 데스크톱에 있어야 합니다)
+              도구 목록 (줄바꿈으로 구분 — local 런타임용)
             </span>
             <textarea
               value={tools}

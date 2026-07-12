@@ -16,7 +16,7 @@ interface TaskResultProps {
 }
 
 const AGENT_LABELS: Record<string, string> = {
-  "local-ocr": "로컬 OCR (PoC)",
+  "local-ocr": "레거시 OCR",
   "meeting-room": "회의실 예약",
   "asset-export": "자산 반출",
   vacation: "휴가 신청",

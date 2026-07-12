@@ -10,9 +10,7 @@ export interface ChatAttachment {
   name: string
   mimeType: string
   size: number
-  /** "text" = 본문 인라인, "image" = data URL, "binary" = 메타데이터만 */
   kind: "text" | "image" | "binary"
-  /** text: 파일 내용, image: base64 data URL, binary: 없음 */
   content?: string
 }
 
@@ -25,7 +23,26 @@ export interface ChatMessage {
   createdAt: string
 }
 
-/** 데스크톱 harness.json과 동일한 스키마 + 웹 관리 필드 */
+export type AgentRuntime = "local" | "databricks"
+
+export interface InputField {
+  key: string
+  label: string
+  type: "string" | "date" | "enum" | "number"
+  required: boolean
+  enumValues?: string[]
+}
+
+export interface InputSchema {
+  fields: InputField[]
+}
+
+export interface GraphSpec {
+  nodes: { id: string; label: string; description?: string }[]
+  edges: { from: string; to: string; kind: "always" | "conditional" }[]
+}
+
+/** 웹 레지스트리 — Desktop/CLI sync SSOT */
 export interface AgentRecord {
   id: string
   name: string
@@ -37,6 +54,14 @@ export interface AgentRecord {
   classifierModel: string
   enabled: boolean
   updatedAt: string
+  runtime: AgentRuntime
+  templateId?: string
+  endpointUrl?: string
+  toolName?: string
+  toolDescription?: string
+  inputSchema?: InputSchema
+  graph?: GraphSpec
+  description?: string
 }
 
 export interface McpServerRecord {
@@ -45,5 +70,17 @@ export interface McpServerRecord {
   url: string
   description: string
   enabled: boolean
+  updatedAt: string
+}
+
+export interface RunRecord {
+  id: string
+  sessionId: string
+  agentId: string
+  status: "running" | "paused" | "completed" | "error"
+  missingFields?: InputField[]
+  collectedFields?: Record<string, unknown>
+  resultJson?: string
+  createdAt: string
   updatedAt: string
 }

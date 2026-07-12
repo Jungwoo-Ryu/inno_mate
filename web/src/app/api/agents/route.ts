@@ -30,7 +30,15 @@ export async function POST(req: NextRequest) {
     delegates: Array.isArray(body.delegates) ? body.delegates : [],
     model: body.model?.trim() || "gpt-5.5",
     classifierModel: body.classifierModel?.trim() || "gpt-5.4-mini",
-    enabled: body.enabled ?? true
+    enabled: body.enabled ?? true,
+    runtime: body.runtime === "databricks" ? "databricks" : "local",
+    templateId: body.templateId,
+    endpointUrl: body.endpointUrl,
+    toolName: body.toolName,
+    toolDescription: body.toolDescription,
+    inputSchema: body.inputSchema,
+    graph: body.graph,
+    description: body.description
   })
 
   return Response.json(agent)
