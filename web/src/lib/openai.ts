@@ -24,9 +24,14 @@ export function getOpenAIClient(): OpenAI {
   const fp = fingerprint(apiKey, baseUrl)
   if (client && clientFingerprint === fp) return client
 
+  const isAzure = (baseUrl || "").includes(".openai.azure.com")
   client = new OpenAI({
     apiKey,
-    baseURL: baseUrl || undefined
+    baseURL: baseUrl || undefined,
+    ...(isAzure && {
+      defaultQuery: { "api-version": process.env.OPENAI_API_VERSION || "2025-01-01-preview" },
+      defaultHeaders: { "api-key": apiKey }
+    })
   })
   clientFingerprint = fp
   return client

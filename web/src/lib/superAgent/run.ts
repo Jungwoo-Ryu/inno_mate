@@ -112,9 +112,14 @@ export async function runWebSuperAgent(options: {
   emit: (event: ClientStreamEvent) => void
   signal?: AbortSignal
 }): Promise<{ status: "success" | "paused" | "error"; message: string; runId?: string }> {
+  const isAzure = (options.baseURL || "").includes(".openai.azure.com")
   const client = new OpenAI({
     apiKey: options.apiKey,
-    baseURL: options.baseURL || undefined
+    baseURL: options.baseURL || undefined,
+    ...(isAzure && {
+      defaultQuery: { "api-version": process.env.OPENAI_API_VERSION || "2025-01-01-preview" },
+      defaultHeaders: { "api-key": options.apiKey }
+    })
   })
 
   const tools = buildToolsFromAgents(options.agents)
