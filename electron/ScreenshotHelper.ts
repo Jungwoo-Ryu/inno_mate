@@ -7,7 +7,6 @@ import { v4 as uuidv4 } from "uuid";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import screenshot from "screenshot-desktop";
-import os from "os";
 
 const execFileAsync = promisify(execFile);
 
@@ -163,43 +162,191 @@ export class ScreenshotHelper {
    * 앱이 위치한 모니터만 전체 캡처 (듀얼 모니터에서 옆 화면 제외)
    */
   private async captureCurrentDisplay(): Promise<Buffer[]> {
-    if (process.platform === "win32") {
-      // Windows: 우선 현재 디스플레이 id로 시도, 실패 시 기존 폴백
+    const active = this.getActiveDisplay?.() ?? null
+    if (active) {
+      console.log(
+        `[Screenshot] Active display id=${active.id} bounds=${JSON.stringify(active.bounds)} scale=${active.scaleFactor}`
+      )
       try {
-        const screenId = await this.resolveScreenshotScreenId()
-        if (screenId != null) {
-          console.log(`[Screenshot] Capturing current display id=${screenId}`)
-          const buffer = await screenshot({ screen: screenId, format: "png" })
-          return [buffer]
+        const viaCapturer = await this.captureViaDesktopCapturer(active)
+        if (viaCapturer?.length) {
+          console.log(
+            `[Screenshot] desktopCapturer OK (${viaCapturer.length} bytes)`
+          )
+          return [viaCapturer]
         }
       } catch (err) {
-        console.warn("Current-display capture failed, Windows fallback:", err)
+        console.warn("[Screenshot] desktopCapturer failed:", err)
       }
-      return [await this.captureWindowsScreenshot()]
+
+      if (process.platform === "darwin") {
+        try {
+          const viaMac = await this.captureMacDisplay(active)
+          if (viaMac?.length) {
+            console.log(`[Screenshot] macOS screencapture OK (${viaMac.length} bytes)`)
+            return [viaMac]
+          }
+        } catch (err) {
+          console.warn("[Screenshot] macOS screencapture failed:", err)
+        }
+      }
+
+      if (process.platform === "win32") {
+        try {
+          const viaWin = await this.captureWindowsSingleDisplay(active)
+          if (viaWin?.length) {
+            console.log(`[Screenshot] Windows single-display OK (${viaWin.length} bytes)`)
+            return [viaWin]
+          }
+        } catch (err) {
+          console.warn("[Screenshot] Windows single-display failed:", err)
+        }
+      }
     }
 
+    // 최후: screenshot-desktop screen id 매칭 (전체 캡처 폴백은 쓰지 않음)
     try {
-      const screenId = await this.resolveScreenshotScreenId()
+      const screenId = await this.resolveScreenshotScreenId(active)
       if (screenId != null) {
-        console.log(`[Screenshot] Capturing current display id=${screenId}`)
+        console.log(`[Screenshot] screenshot-desktop screen=${screenId}`)
         const buffer = await screenshot({ screen: screenId, format: "png" })
-        return [buffer]
+        if (buffer?.length) return [buffer]
       }
     } catch (err) {
-      console.warn("Current-display capture failed, falling back:", err)
+      console.warn("[Screenshot] screenshot-desktop screen capture failed:", err)
     }
 
-    const buffer = await screenshot({ format: "png" })
-    return [buffer]
+    throw new Error(
+      "현재 모니터 스크린샷에 실패했습니다. 화면 녹화 권한(macOS)을 확인해 주세요."
+    )
   }
 
-  /** Electron Display ↔ screenshot-desktop screen id 매칭 (좌→우 정렬 인덱스) */
-  private async resolveScreenshotScreenId(): Promise<number | undefined> {
-    const active = this.getActiveDisplay?.()
+  /**
+   * Electron desktopCapturer — display_id로 단일 모니터 매칭 (가장 신뢰도 높음)
+   */
+  private async captureViaDesktopCapturer(
+    display: Electron.Display
+  ): Promise<Buffer | null> {
+    const { desktopCapturer } = await import("electron")
+    const scale = display.scaleFactor || 1
+    const width = Math.max(1, Math.round(display.bounds.width * scale))
+    const height = Math.max(1, Math.round(display.bounds.height * scale))
+
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width, height },
+      fetchWindowIcons: false
+    })
+
+    console.log(
+      "[Screenshot] capturer sources:",
+      sources.map((s) => ({
+        id: s.id,
+        display_id: s.display_id,
+        name: s.name,
+        size: s.thumbnail.getSize()
+      }))
+    )
+
+    const matched =
+      sources.find((s) => s.display_id === String(display.id)) ||
+      sources.find((s) => {
+        const size = s.thumbnail.getSize()
+        return (
+          Math.abs(size.width - width) <= 2 &&
+          Math.abs(size.height - height) <= 2
+        )
+      })
+
+    if (!matched) return null
+
+    const size = matched.thumbnail.getSize()
+    // 가상 데스크톱(전체 모니터 합본)이면 거부
+    if (
+      size.width > width * 1.2 ||
+      size.height > height * 1.2
+    ) {
+      console.warn(
+        `[Screenshot] Rejecting oversized thumbnail ${size.width}x${size.height} (expected ~${width}x${height})`
+      )
+      return null
+    }
+
+    return matched.thumbnail.toPNG()
+  }
+
+  /** macOS: screencapture -D <1-based index> */
+  private async captureMacDisplay(
+    display: Electron.Display
+  ): Promise<Buffer | null> {
+    const { screen } = await import("electron")
+    const sorted = [...screen.getAllDisplays()].sort(
+      (a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y
+    )
+    const idx = sorted.findIndex((d) => d.id === display.id)
+    if (idx < 0) return null
+
+    const displayNumber = idx + 1 // screencapture -D is 1-based
+    const tempFile = path.join(this.tempDir, `mac-${uuidv4()}.png`)
+    await execFileAsync("screencapture", [
+      "-x",
+      "-t",
+      "png",
+      "-D",
+      String(displayNumber),
+      tempFile
+    ])
+
+    if (!fs.existsSync(tempFile)) return null
+    const buffer = await fs.promises.readFile(tempFile)
+    try {
+      await fs.promises.unlink(tempFile)
+    } catch {
+      /* ignore */
+    }
+    return buffer.length ? buffer : null
+  }
+
+  /** Windows: 지정 모니터 Bounds만 CopyFromScreen */
+  private async captureWindowsSingleDisplay(
+    display: Electron.Display
+  ): Promise<Buffer | null> {
+    const tempFile = path.join(this.tempDir, `win-${uuidv4()}.png`)
+    const { x, y, width, height } = display.bounds
+    const psScript = `
+      Add-Type -AssemblyName System.Drawing
+      $bmp = New-Object System.Drawing.Bitmap ${width}, ${height}
+      $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+      $graphics.CopyFromScreen(${x}, ${y}, 0, 0, (New-Object System.Drawing.Size(${width}, ${height})))
+      $bmp.Save('${tempFile.replace(/\\/g, "\\\\")}', [System.Drawing.Imaging.ImageFormat]::Png)
+      $graphics.Dispose()
+      $bmp.Dispose()
+    `
+    await execFileAsync("powershell", [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      psScript
+    ])
+    if (!fs.existsSync(tempFile)) return null
+    const buffer = await fs.promises.readFile(tempFile)
+    try {
+      await fs.promises.unlink(tempFile)
+    } catch {
+      /* ignore */
+    }
+    return buffer.length ? buffer : null
+  }
+
+  /** Electron Display ↔ screenshot-desktop screen id 매칭 */
+  private async resolveScreenshotScreenId(
+    active: Electron.Display | null
+  ): Promise<number | string | undefined> {
     const listed = await screenshot.listDisplays()
     if (!listed.length) return undefined
     if (!active || listed.length === 1) {
-      return Number(listed[0].id)
+      return listed[0].id
     }
 
     const { screen } = await import("electron")
@@ -208,125 +355,18 @@ export class ScreenshotHelper {
     )
     const idx = sortedElectron.findIndex((d) => d.id === active.id)
     if (idx >= 0 && idx < listed.length) {
-      return Number(listed[idx].id)
+      return listed[idx].id
     }
-    return Number(listed[0].id)
-  }
 
-  private async captureScreenshot(): Promise<Buffer> {
-    const buffers = await this.captureCurrentDisplay()
-    return buffers[0]
-  }
+    // name/bounds 힌트로 재매칭 시도
+    const byName = listed.find((d) =>
+      String(d.name || "")
+        .toLowerCase()
+        .includes(String(active.id))
+    )
+    if (byName) return byName.id
 
-  /**
-   * Windows-specific screenshot capture with multiple fallback mechanisms
-   */
-  private async captureWindowsScreenshot(): Promise<Buffer> {
-    console.log("Attempting Windows screenshot with multiple methods");
-
-    // Method 1: Try screenshot-desktop with filename first
-    try {
-      const tempFile = path.join(this.tempDir, `temp-${uuidv4()}.png`);
-      console.log(
-        `Taking Windows screenshot to temp file (Method 1): ${tempFile}`
-      );
-
-      await screenshot({ filename: tempFile });
-
-      if (fs.existsSync(tempFile)) {
-        const buffer = await fs.promises.readFile(tempFile);
-        console.log(
-          `Method 1 successful, screenshot size: ${buffer.length} bytes`
-        );
-
-        // Cleanup temp file
-        try {
-          await fs.promises.unlink(tempFile);
-        } catch (cleanupErr) {
-          console.warn("Failed to clean up temp file:", cleanupErr);
-        }
-
-        return buffer;
-      } else {
-        console.log("Method 1 failed: File not created");
-        throw new Error("Screenshot file not created");
-      }
-    } catch (error) {
-      console.warn("Windows screenshot Method 1 failed:", error);
-
-      // Method 2: Try using PowerShell
-      try {
-        console.log("Attempting Windows screenshot with PowerShell (Method 2)");
-        const tempFile = path.join(this.tempDir, `ps-temp-${uuidv4()}.png`);
-
-        // PowerShell command to take screenshot using .NET classes
-        const psScript = `
-        Add-Type -AssemblyName System.Windows.Forms,System.Drawing
-        $screens = [System.Windows.Forms.Screen]::AllScreens
-        $top = ($screens | ForEach-Object {$_.Bounds.Top} | Measure-Object -Minimum).Minimum
-        $left = ($screens | ForEach-Object {$_.Bounds.Left} | Measure-Object -Minimum).Minimum
-        $width = ($screens | ForEach-Object {$_.Bounds.Right} | Measure-Object -Maximum).Maximum
-        $height = ($screens | ForEach-Object {$_.Bounds.Bottom} | Measure-Object -Maximum).Maximum
-        $bounds = [System.Drawing.Rectangle]::FromLTRB($left, $top, $width, $height)
-        $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
-        $graphics = [System.Drawing.Graphics]::FromImage($bmp)
-        $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bounds.Size)
-        $bmp.Save('${tempFile.replace(
-          /\\/g,
-          "\\\\"
-        )}', [System.Drawing.Imaging.ImageFormat]::Png)
-        $graphics.Dispose()
-        $bmp.Dispose()
-        `;
-
-        // Execute PowerShell
-        await execFileAsync("powershell", [
-          "-NoProfile",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-Command",
-          psScript,
-        ]);
-
-        // Check if file exists and read it
-        if (fs.existsSync(tempFile)) {
-          const buffer = await fs.promises.readFile(tempFile);
-          console.log(
-            `Method 2 successful, screenshot size: ${buffer.length} bytes`
-          );
-
-          // Cleanup
-          try {
-            await fs.promises.unlink(tempFile);
-          } catch (err) {
-            console.warn("Failed to clean up PowerShell temp file:", err);
-          }
-
-          return buffer;
-        } else {
-          throw new Error("PowerShell screenshot file not created");
-        }
-      } catch (psError) {
-        console.warn("Windows PowerShell screenshot failed:", psError);
-
-        // Method 3: Last resort - create a tiny placeholder image
-        console.log(
-          "All screenshot methods failed, creating placeholder image"
-        );
-
-        // Create a 1x1 transparent PNG as fallback
-        const fallbackBuffer = Buffer.from(
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-          "base64"
-        );
-        console.log("Created placeholder image as fallback");
-
-        // Show the error but return a valid buffer so the app doesn't crash
-        throw new Error(
-          "Could not capture screenshot with any method. Please check your Windows security settings and try again."
-        );
-      }
-    }
+    return listed[Math.min(Math.max(idx, 0), listed.length - 1)]?.id
   }
 
   public async takeScreenshot(
@@ -334,6 +374,26 @@ export class ScreenshotHelper {
     showMainWindow: () => void
   ): Promise<string[]> {
     console.log("Taking screenshot in view:", this.view);
+
+    // hide 전에 현재 디스플레이를 확정 (hide 후에도 bounds는 유지되지만 명시적으로 고정)
+    const lockedDisplay = this.getActiveDisplay?.() ?? null
+    if (lockedDisplay) {
+      const previous = this.getActiveDisplay
+      this.getActiveDisplay = () => lockedDisplay
+      try {
+        return await this.takeScreenshotInner(hideMainWindow, showMainWindow)
+      } finally {
+        this.getActiveDisplay = previous
+      }
+    }
+
+    return this.takeScreenshotInner(hideMainWindow, showMainWindow)
+  }
+
+  private async takeScreenshotInner(
+    hideMainWindow: () => void,
+    showMainWindow: () => void
+  ): Promise<string[]> {
     hideMainWindow();
 
     const hideDelay = process.platform === "win32" ? 500 : 300;
