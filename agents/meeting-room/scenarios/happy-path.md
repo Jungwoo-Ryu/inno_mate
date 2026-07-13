@@ -11,10 +11,10 @@
 
 ## Expected Tool Sequence
 
-1. `gportal.ensure_session`
-2. `gportal.navigate` → "시설관리 > 회의실 예약"
-3. `meeting-room.search` → date=내일, startTime=14:00, endTime=15:00
-4. `meeting-room.reserve` → room="3층 회의실A"
+1. `gportal_ensure_session`
+2. `gportal_navigate` → "시설관리 > 회의실 예약"
+3. `meeting_room_search` → date=내일, startTime=14:00, endTime=15:00
+4. `meeting_room_reserve` → room="3층 회의실A"
 
 ## Expected Output (Korean)
 

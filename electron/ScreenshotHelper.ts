@@ -209,7 +209,10 @@ export class ScreenshotHelper {
       const screenId = await this.resolveScreenshotScreenId(active)
       if (screenId != null) {
         console.log(`[Screenshot] screenshot-desktop screen=${screenId}`)
-        const buffer = await screenshot({ screen: screenId, format: "png" })
+        const buffer = await screenshot({
+          screen: typeof screenId === "number" ? screenId : Number(screenId),
+          format: "png"
+        })
         if (buffer?.length) return [buffer]
       }
     } catch (err) {
@@ -373,6 +376,13 @@ export class ScreenshotHelper {
     hideMainWindow: () => void,
     showMainWindow: () => void
   ): Promise<string[]> {
+    // 결과/디버그 화면에서 찍으면 extra 큐로 가 Cmd+Enter가 못 씀 → 새 업무로 간주
+    if (this.view !== "queue") {
+      console.log(
+        `[Screenshot] view=${this.view} → queue (새 스크린샷을 main 큐에 저장)`
+      )
+      this.setView("queue")
+    }
     console.log("Taking screenshot in view:", this.view);
 
     // hide 전에 현재 디스플레이를 확정 (hide 후에도 bounds는 유지되지만 명시적으로 고정)

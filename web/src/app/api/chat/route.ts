@@ -120,6 +120,9 @@ Respond in Korean (존댓말).`
         const result = await runWebSuperAgent({
           apiKey: credentials.apiKey,
           baseURL: credentials.baseURL,
+          provider: credentials.provider,
+          azureEndpoint: credentials.azureEndpoint,
+          azureApiVersion: credentials.azureApiVersion,
           model: agent?.model || credentials.model || getDefaultModel(),
           systemPrompt,
           message,

@@ -22,6 +22,20 @@ export interface McpServerConfig {
   enabled: boolean
   lastStatus: "connected" | "disconnected" | "error"
   lastError?: string
+  transport?: "stdio" | "http" | "sse"
+  command?: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string>
+  endpointUrl?: string
+  description?: string
+  cachedTools?: Array<{
+    name: string
+    description?: string
+    inputSchema?: Record<string, unknown>
+    paramKeys?: string[]
+  }>
+  toolsCachedAt?: string
 }
 
 export const AGENT_LABELS: Record<string, string> = {

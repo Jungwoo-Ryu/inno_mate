@@ -241,7 +241,7 @@ export default function AgentEditor({ agent, onClose }: AgentEditorProps) {
               value={tools}
               onChange={(e) => setTools(e.target.value)}
               rows={4}
-              placeholder={"gportal.ensure_session\ngportal.navigate\nvacation.apply"}
+              placeholder={"gportal_ensure_session\ngportal_navigate\nvacation_apply"}
               className="glass-input w-full resize-y font-mono text-[12px]"
             />
           </label>

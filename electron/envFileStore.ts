@@ -62,10 +62,6 @@ export function getWritableEnvPaths(): string[] {
     // app not ready
   }
 
-  if (isDev) {
-    paths.push(path.join(process.cwd(), ".env"))
-  }
-
   return [...new Set(paths)]
 }
 
@@ -94,25 +90,54 @@ function apiKeyEnvName(provider: APIProviderEnv): string {
   switch (provider) {
     case "openai":
       return ENV.OPENAI_API_KEY
-    case "gemini":
-      return ENV.GEMINI_API_KEY
+    case "azure":
+      return ENV.AZURE_OPENAI_API_KEY
     case "anthropic":
       return ENV.ANTHROPIC_API_KEY
   }
 }
 
+export interface SaveApiCredentialOptions {
+  agentModel?: string
+  openaiBaseUrl?: string
+  azureEndpoint?: string
+  azureApiVersion?: string
+}
+
 export function saveApiCredentialsToEnvFiles(
   apiKey: string,
   provider: APIProviderEnv,
-  agentModel?: string
+  options?: SaveApiCredentialOptions | string
 ): string[] {
+  // 하위 호환: 세 번째 인자가 agentModel 문자열인 경우
+  const opts: SaveApiCredentialOptions =
+    typeof options === "string" ? { agentModel: options } : options ?? {}
+
   const entries: Record<string, string> = {
     [apiKeyEnvName(provider)]: apiKey,
     [ENV.INNOMATE_API_PROVIDER]: provider
   }
 
-  if (agentModel?.trim()) {
-    entries[ENV.INNOMATE_AGENT_MODEL] = agentModel.trim()
+  if (opts.agentModel?.trim()) {
+    entries[ENV.INNOMATE_AGENT_MODEL] = opts.agentModel.trim()
+    if (provider === "azure") {
+      entries[ENV.AZURE_OPENAI_DEPLOYMENT] = opts.agentModel.trim()
+    }
+  }
+
+  if (provider === "openai" && opts.openaiBaseUrl !== undefined) {
+    entries[ENV.OPENAI_BASE_URL] = opts.openaiBaseUrl.trim().replace(/\/$/, "")
+  }
+
+  if (provider === "azure") {
+    if (opts.azureEndpoint?.trim()) {
+      entries[ENV.AZURE_OPENAI_ENDPOINT] = opts.azureEndpoint
+        .trim()
+        .replace(/\/$/, "")
+    }
+    if (opts.azureApiVersion?.trim()) {
+      entries[ENV.AZURE_OPENAI_API_VERSION] = opts.azureApiVersion.trim()
+    }
   }
 
   const written: string[] = []

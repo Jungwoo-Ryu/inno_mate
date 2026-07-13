@@ -1,12 +1,14 @@
 /**
  * Environment variable keys for InnoMate.
  * API 키는 .env, 하드코딩, config.json 순으로 해석됩니다.
- * UI에서 저장하면 로컬 .env 파일에 기록됩니다.
  */
 export const ENV = {
   OPENAI_API_KEY: "OPENAI_API_KEY",
   OPENAI_BASE_URL: "OPENAI_BASE_URL",
-  GEMINI_API_KEY: "GEMINI_API_KEY",
+  AZURE_OPENAI_API_KEY: "AZURE_OPENAI_API_KEY",
+  AZURE_OPENAI_ENDPOINT: "AZURE_OPENAI_ENDPOINT",
+  AZURE_OPENAI_API_VERSION: "AZURE_OPENAI_API_VERSION",
+  AZURE_OPENAI_DEPLOYMENT: "AZURE_OPENAI_DEPLOYMENT",
   ANTHROPIC_API_KEY: "ANTHROPIC_API_KEY",
   INNOMATE_API_PROVIDER: "INNOMATE_API_PROVIDER",
   GPORTAL_URL: "GPORTAL_URL",
@@ -18,11 +20,14 @@ export const ENV = {
   GH_TOKEN: "GH_TOKEN"
 } as const
 
-export type APIProviderEnv = "openai" | "gemini" | "anthropic"
+export type APIProviderEnv = "openai" | "azure" | "anthropic"
 
 export interface EnvOverrides {
   apiKey?: string
   apiProvider?: APIProviderEnv
+  openaiBaseUrl?: string
+  azureEndpoint?: string
+  azureApiVersion?: string
   gportalUrl?: string
   gportalUsername?: string
   gportalPassword?: string
@@ -35,7 +40,9 @@ export interface EnvOverrides {
  */
 export const HARDCODED_SECRETS: EnvOverrides = {
   // apiKey: "your-api-key",
-  // apiProvider: "gemini",
+  // apiProvider: "azure",
+  // azureEndpoint: "https://YOUR_RESOURCE.openai.azure.com",
+  // azureApiVersion: "2024-10-21",
 }
 
 export function readHardcodedSecrets(): EnvOverrides {
@@ -44,6 +51,15 @@ export function readHardcodedSecrets(): EnvOverrides {
   if (key) {
     out.apiKey = key
     out.apiProvider = HARDCODED_SECRETS.apiProvider
+  }
+  if (HARDCODED_SECRETS.openaiBaseUrl?.trim()) {
+    out.openaiBaseUrl = HARDCODED_SECRETS.openaiBaseUrl.trim()
+  }
+  if (HARDCODED_SECRETS.azureEndpoint?.trim()) {
+    out.azureEndpoint = HARDCODED_SECRETS.azureEndpoint.trim()
+  }
+  if (HARDCODED_SECRETS.azureApiVersion?.trim()) {
+    out.azureApiVersion = HARDCODED_SECRETS.azureApiVersion.trim()
   }
   if (HARDCODED_SECRETS.gportalUrl?.trim()) {
     out.gportalUrl = HARDCODED_SECRETS.gportalUrl.trim()
@@ -61,17 +77,18 @@ export function readHardcodedSecrets(): EnvOverrides {
 }
 
 function parseProvider(value: string | undefined): APIProviderEnv | undefined {
-  if (value === "gemini" || value === "anthropic" || value === "openai") {
+  if (value === "azure" || value === "anthropic" || value === "openai") {
     return value
   }
+  // 레거시 gemini → openai로 취급하지 않고 무시
   return undefined
 }
 
 export function readEnvOverrides(): EnvOverrides {
   const overrides: EnvOverrides = {}
 
-  const geminiKey = process.env[ENV.GEMINI_API_KEY]?.trim()
   const openaiKey = process.env[ENV.OPENAI_API_KEY]?.trim()
+  const azureKey = process.env[ENV.AZURE_OPENAI_API_KEY]?.trim()
   const anthropicKey = process.env[ENV.ANTHROPIC_API_KEY]?.trim()
   const envProvider = parseProvider(
     process.env[ENV.INNOMATE_API_PROVIDER]?.trim().toLowerCase()
@@ -80,15 +97,15 @@ export function readEnvOverrides(): EnvOverrides {
   if (envProvider === "openai" && openaiKey) {
     overrides.apiKey = openaiKey
     overrides.apiProvider = "openai"
-  } else if (envProvider === "gemini" && geminiKey) {
-    overrides.apiKey = geminiKey
-    overrides.apiProvider = "gemini"
+  } else if (envProvider === "azure" && (azureKey || openaiKey)) {
+    overrides.apiKey = azureKey || openaiKey
+    overrides.apiProvider = "azure"
   } else if (envProvider === "anthropic" && anthropicKey) {
     overrides.apiKey = anthropicKey
     overrides.apiProvider = "anthropic"
-  } else if (geminiKey) {
-    overrides.apiKey = geminiKey
-    overrides.apiProvider = "gemini"
+  } else if (azureKey) {
+    overrides.apiKey = azureKey
+    overrides.apiProvider = "azure"
   } else if (openaiKey) {
     overrides.apiKey = openaiKey
     overrides.apiProvider = "openai"
@@ -101,6 +118,15 @@ export function readEnvOverrides(): EnvOverrides {
     overrides.apiProvider = envProvider
   }
 
+  const openaiBaseUrl = process.env[ENV.OPENAI_BASE_URL]?.trim()
+  if (openaiBaseUrl) overrides.openaiBaseUrl = openaiBaseUrl.replace(/\/$/, "")
+
+  const azureEndpoint = process.env[ENV.AZURE_OPENAI_ENDPOINT]?.trim()
+  if (azureEndpoint) overrides.azureEndpoint = azureEndpoint.replace(/\/$/, "")
+
+  const azureApiVersion = process.env[ENV.AZURE_OPENAI_API_VERSION]?.trim()
+  if (azureApiVersion) overrides.azureApiVersion = azureApiVersion
+
   const gportalUrl = process.env[ENV.GPORTAL_URL]?.trim()
   if (gportalUrl) overrides.gportalUrl = gportalUrl
 
@@ -110,7 +136,9 @@ export function readEnvOverrides(): EnvOverrides {
   const gportalPassword = process.env[ENV.GPORTAL_PASSWORD]?.trim()
   if (gportalPassword) overrides.gportalPassword = gportalPassword
 
-  const agentModel = process.env[ENV.INNOMATE_AGENT_MODEL]?.trim()
+  const agentModel =
+    process.env[ENV.INNOMATE_AGENT_MODEL]?.trim() ||
+    process.env[ENV.AZURE_OPENAI_DEPLOYMENT]?.trim()
   if (agentModel) overrides.agentModel = agentModel
 
   return overrides
@@ -122,10 +150,25 @@ export function getOpenAIBaseUrl(): string | undefined {
   return url ? url.replace(/\/$/, "") : undefined
 }
 
+export function getAzureOpenAIConfig(): {
+  endpoint?: string
+  apiVersion: string
+  apiKey?: string
+} {
+  return {
+    endpoint: process.env[ENV.AZURE_OPENAI_ENDPOINT]?.trim()?.replace(/\/$/, ""),
+    apiVersion:
+      process.env[ENV.AZURE_OPENAI_API_VERSION]?.trim() || "2024-10-21",
+    apiKey:
+      process.env[ENV.AZURE_OPENAI_API_KEY]?.trim() ||
+      process.env[ENV.OPENAI_API_KEY]?.trim()
+  }
+}
+
 export function hasEnvApiKey(): boolean {
   return Boolean(
-    process.env[ENV.GEMINI_API_KEY]?.trim() ||
-      process.env[ENV.OPENAI_API_KEY]?.trim() ||
+    process.env[ENV.OPENAI_API_KEY]?.trim() ||
+      process.env[ENV.AZURE_OPENAI_API_KEY]?.trim() ||
       process.env[ENV.ANTHROPIC_API_KEY]?.trim()
   )
 }
@@ -144,13 +187,13 @@ export function hasEnvGportalConfig(): boolean {
 
 export function getEnvSourceLabels(): string[] {
   const labels: string[] = []
-  if (process.env[ENV.GEMINI_API_KEY]?.trim()) labels.push("GEMINI_API_KEY")
   if (process.env[ENV.OPENAI_API_KEY]?.trim()) labels.push("OPENAI_API_KEY")
+  if (process.env[ENV.AZURE_OPENAI_API_KEY]?.trim()) labels.push("AZURE_OPENAI_API_KEY")
+  if (process.env[ENV.AZURE_OPENAI_ENDPOINT]?.trim()) labels.push("AZURE_OPENAI_ENDPOINT")
   if (process.env[ENV.ANTHROPIC_API_KEY]?.trim()) labels.push("ANTHROPIC_API_KEY")
   if (process.env[ENV.INNOMATE_API_PROVIDER]?.trim()) labels.push("INNOMATE_API_PROVIDER")
+  if (process.env[ENV.OPENAI_BASE_URL]?.trim()) labels.push("OPENAI_BASE_URL")
   if (process.env[ENV.GPORTAL_URL]?.trim()) labels.push("GPORTAL_URL")
-  if (process.env[ENV.GPORTAL_USERNAME]?.trim()) labels.push("GPORTAL_USERNAME")
-  if (process.env[ENV.GPORTAL_PASSWORD]?.trim()) labels.push("GPORTAL_PASSWORD")
   if (process.env[ENV.INNOMATE_AGENT_MODEL]?.trim()) labels.push("INNOMATE_AGENT_MODEL")
   return labels
 }

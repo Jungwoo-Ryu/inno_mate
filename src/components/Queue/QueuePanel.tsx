@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { Camera, Bot, Plug } from "lucide-react"
 import { useToast } from "../../contexts/toast"
 import { COMMAND_KEY } from "../../utils/platform"
 import QueueSettingsMenu from "./QueueSettingsMenu"
 import ChatComposer from "./ChatComposer"
+import ChatLog from "./ChatLog"
 import AgentManagerSheet from "./AgentManagerSheet"
 import McpConnectionSheet from "./McpConnectionSheet"
 import type { AttachmentFile } from "../../types/agents"
+import type { AgentTaskResult, DisplayMessage } from "../../types/chat"
 
 interface QueuePanelProps {
   screenshotCount: number
@@ -56,13 +58,21 @@ function ActionTile({
   )
 }
 
+let msgSeq = 0
+function nextMsgId(prefix: string): string {
+  msgSeq += 1
+  return `${prefix}-${Date.now()}-${msgSeq}`
+}
+
 const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount }) => {
   const { showToast } = useToast()
   const [prompt, setPrompt] = useState("")
   const [attachments, setAttachments] = useState<AttachmentFile[]>([])
   const [isRunning, setIsRunning] = useState(false)
+  const [resuming, setResuming] = useState(false)
   const [showAgents, setShowAgents] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
+  const [messages, setMessages] = useState<DisplayMessage[]>([])
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -72,16 +82,122 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount }) => {
     return () => clearTimeout(timer)
   }, [prompt, attachments])
 
+  const appendUserFromTurn = useCallback(
+    (data: {
+      content?: string
+      screenshotCount?: number
+      attachmentCount?: number
+      hitlResume?: boolean
+    }) => {
+      // 글로벌 Cmd+Enter 경로에서도 입력창 비움
+      if (!data.hitlResume) {
+        setPrompt("")
+        setAttachments([])
+      }
+
+      const parts: string[] = []
+      if (data.hitlResume) {
+        parts.push(`추가 입력: ${data.content || ""}`)
+      } else if (data.content?.trim()) {
+        parts.push(data.content.trim())
+      }
+      if (!data.hitlResume && data.screenshotCount && data.screenshotCount > 0) {
+        parts.push(`[스크린샷 ${data.screenshotCount}장]`)
+      }
+      if (!data.hitlResume && data.attachmentCount && data.attachmentCount > 0) {
+        parts.push(`[첨부 ${data.attachmentCount}개]`)
+      }
+      const content = parts.filter(Boolean).join("\n")
+      if (!content) return
+
+      setMessages((prev) => {
+        const last = prev[prev.length - 1]
+        if (last?.role === "user" && last.content === content) return prev
+        return [
+          ...prev,
+          {
+            id: nextMsgId("u"),
+            role: "user",
+            content
+          }
+        ]
+      })
+    },
+    []
+  )
+
   useEffect(() => {
     const cleanupFunctions = [
+      window.electronAPI.onAgentUserTurn(appendUserFromTurn),
       window.electronAPI.onAgentRunStart(() => setIsRunning(true)),
-      window.electronAPI.onAgentRunSuccess(() => setIsRunning(false)),
-      window.electronAPI.onAgentRunError(() => setIsRunning(false)),
-      window.electronAPI.onProcessingNoScreenshots(() => setIsRunning(false)),
-      window.electronAPI.onResetView(() => setIsRunning(false))
+      window.electronAPI.onAgentRunSuccess((raw: unknown) => {
+        setIsRunning(false)
+        setResuming(false)
+        const data = raw as AgentTaskResult
+        const missingFieldDefs =
+          data.missingFieldDefs ??
+          (data.missingFields ?? []).map((key) => ({
+            key,
+            label: key,
+            type: "string" as const,
+            required: true
+          }))
+
+        setMessages((prev) => {
+          // 이전 needs_input 폼은 닫기 (재개 후 새 응답으로 교체)
+          const closed = prev.map((m) =>
+            m.status === "needs_input" && m.hitl
+              ? { ...m, hitl: null, status: "needs_input" as const }
+              : m
+          )
+          return [
+            ...closed,
+            {
+              id: nextMsgId("a"),
+              role: "assistant" as const,
+              content: data.message_ko || "(응답 없음)",
+              status: (data.status as DisplayMessage["status"]) || "success",
+              agentId: data.agentId,
+              hitl:
+                data.status === "needs_input" && missingFieldDefs.length
+                  ? {
+                      runId: data.runId,
+                      agentId: data.agentId,
+                      missingFieldDefs,
+                      collectedFields: data.collectedFields ?? {}
+                    }
+                  : null
+            }
+          ]
+        })
+      }),
+      window.electronAPI.onAgentRunError((error: string) => {
+        setIsRunning(false)
+        setResuming(false)
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextMsgId("e"),
+            role: "assistant",
+            content: error,
+            status: "error"
+          }
+        ])
+      }),
+      window.electronAPI.onProcessingNoScreenshots(() => {
+        setIsRunning(false)
+        showToast("안내", "스크린샷, 파일, 또는 업무 내용을 입력하세요", "neutral")
+      }),
+      window.electronAPI.onResetView(() => {
+        setIsRunning(false)
+        setResuming(false)
+        setMessages([])
+        setPrompt("")
+        setAttachments([])
+      })
     ]
     return () => cleanupFunctions.forEach((cleanup) => cleanup())
-  }, [])
+  }, [appendUserFromTurn, showToast])
 
   const handleScreenshot = async () => {
     try {
@@ -96,28 +212,51 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount }) => {
 
   const handleRun = async () => {
     const trimmed = prompt.trim()
-    const hasInput = trimmed.length > 0 || attachments.length > 0
+    const attachmentPaths = attachments.map((a) => a.path)
+    const hasInput = trimmed.length > 0 || attachmentPaths.length > 0
 
     if (screenshotCount === 0 && !hasInput) {
       showToast("안내", "스크린샷, 파일, 또는 업무 내용을 입력하세요", "neutral")
       return
     }
+
+    // 메신저처럼 전송 즉시 입력창 비움
+    setPrompt("")
+    setAttachments([])
     setIsRunning(true)
+
     try {
       await window.electronAPI.setUserPrompt(trimmed || undefined)
-      await window.electronAPI.setAttachments(attachments.map((a) => a.path))
+      await window.electronAPI.setAttachments(attachmentPaths)
       const result = await window.electronAPI.triggerProcessScreenshots(
         trimmed || undefined
       )
       if (!result.success) {
         showToast("오류", "Agent 실행에 실패했습니다", "error")
-      } else {
-        setPrompt("")
-        setAttachments([])
+        setIsRunning(false)
       }
     } catch {
       showToast("오류", "Agent 실행에 실패했습니다", "error")
-    } finally {
+      setIsRunning(false)
+    }
+  }
+
+  const handleResume = async (
+    _runId: string | undefined,
+    fields: Record<string, string>
+  ) => {
+    setResuming(true)
+    setIsRunning(true)
+    try {
+      const result = await window.electronAPI.resumeAgentRun(fields)
+      if (!result.success) {
+        showToast("오류", result.error || "HITL 재개에 실패했습니다", "error")
+        setResuming(false)
+        setIsRunning(false)
+      }
+    } catch {
+      showToast("오류", "HITL 재개에 실패했습니다", "error")
+      setResuming(false)
       setIsRunning(false)
     }
   }
@@ -139,15 +278,6 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount }) => {
       </div>
 
       <div className="relative overflow-hidden rounded-[22px] border border-white/[0.12] bg-black/70 shadow-[0_8px_32px_rgba(0,0,0,0.4)] backdrop-blur-2xl">
-        {isRunning && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-[22px] bg-black/60 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-2">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
-              <p className="text-[11px] text-white/60">Super Agent 실행 중…</p>
-            </div>
-          </div>
-        )}
-
         {/* 로고 — 상단 중앙 */}
         <div className="flex flex-col items-center px-3 pt-4 pb-3">
           <img
@@ -221,6 +351,18 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ screenshotCount }) => {
             </span>
           )}
         </div>
+
+        {/* 채팅 로그 + HITL */}
+        {(messages.length > 0 || isRunning) && (
+          <div className="border-t border-white/[0.06] px-3 py-2">
+            <ChatLog
+              messages={messages}
+              isRunning={isRunning}
+              onResume={handleResume}
+              resuming={resuming}
+            />
+          </div>
+        )}
 
         {/* 채팅 입력 */}
         <div className="border-t border-white/[0.06] px-3 pb-3 pt-3">

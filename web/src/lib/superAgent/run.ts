@@ -102,6 +102,9 @@ async function simulateAgentRun(
 export async function runWebSuperAgent(options: {
   apiKey: string
   baseURL?: string
+  provider?: "openai" | "azure"
+  azureEndpoint?: string
+  azureApiVersion?: string
   model: string
   systemPrompt: string
   message: string
@@ -112,10 +115,23 @@ export async function runWebSuperAgent(options: {
   emit: (event: ClientStreamEvent) => void
   signal?: AbortSignal
 }): Promise<{ status: "success" | "paused" | "error"; message: string; runId?: string }> {
-  const client = new OpenAI({
-    apiKey: options.apiKey,
-    baseURL: options.baseURL || undefined
-  })
+  let client: OpenAI
+  if (options.provider === "azure") {
+    const { AzureOpenAI } = await import("openai")
+    if (!options.azureEndpoint) {
+      throw new Error("Azure Endpoint가 필요합니다")
+    }
+    client = new AzureOpenAI({
+      endpoint: options.azureEndpoint,
+      apiKey: options.apiKey,
+      apiVersion: options.azureApiVersion || "2024-10-21"
+    })
+  } else {
+    client = new OpenAI({
+      apiKey: options.apiKey,
+      baseURL: options.baseURL || undefined
+    })
+  }
 
   const tools = buildToolsFromAgents(options.agents)
   const userContent: string | OpenAI.Chat.ChatCompletionContentPart[] =

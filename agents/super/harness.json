@@ -3,12 +3,12 @@
   "version": "1.0.0",
   "guide": "GUIDE.md",
   "tools": [
-    "gportal.ensure_session",
-    "gportal.navigate",
-    "meeting-room.search",
-    "meeting-room.reserve",
-    "asset-export.submit",
-    "vacation.apply"
+    "gportal_ensure_session",
+    "gportal_navigate",
+    "meeting_room_search",
+    "meeting_room_reserve",
+    "asset_export_submit",
+    "vacation_apply"
   ],
   "model": "gpt-5.5",
   "classifierModel": "gpt-5.4-mini",

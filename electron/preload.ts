@@ -79,9 +79,35 @@ const electronAPI = {
     ipcRenderer.invoke("save-mcp-servers", servers),
   testMcpConnection: (server: unknown) =>
     ipcRenderer.invoke("test-mcp-connection", server),
+  refreshMcpTools: () => ipcRenderer.invoke("refresh-mcp-tools"),
+  getMcpToolCache: () => ipcRenderer.invoke("get-mcp-tool-cache"),
+  importCursorMcpJson: (json: unknown) =>
+    ipcRenderer.invoke("import-cursor-mcp-json", json),
   triggerProcessScreenshots: (prompt?: string) =>
     ipcRenderer.invoke("trigger-process-screenshots", prompt),
+  resumeAgentRun: (fields: Record<string, string>) =>
+    ipcRenderer.invoke("resume-agent-run", fields),
   triggerReset: () => ipcRenderer.invoke("trigger-reset"),
+  onAgentUserTurn: (
+    callback: (data: {
+      content?: string
+      screenshotCount?: number
+      attachmentCount?: number
+      hitlResume?: boolean
+    }) => void
+  ) => {
+    const subscription = (
+      _: unknown,
+      data: {
+        content?: string
+        screenshotCount?: number
+        attachmentCount?: number
+        hitlResume?: boolean
+      }
+    ) => callback(data)
+    ipcRenderer.on("agent-user-turn", subscription)
+    return () => ipcRenderer.removeListener("agent-user-turn", subscription)
+  },
   triggerMoveLeft: () => ipcRenderer.invoke("trigger-move-left"),
   triggerMoveRight: () => ipcRenderer.invoke("trigger-move-right"),
   triggerMoveUp: () => ipcRenderer.invoke("trigger-move-up"),

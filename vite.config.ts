@@ -4,6 +4,12 @@ import electron from "vite-plugin-electron"
 import react from "@vitejs/plugin-react"
 import path from "path"
 
+const electronExternals = [
+  "electron",
+  "better-sqlite3",
+  "screenshot-desktop"
+]
+
 export default defineConfig({
   plugins: [
     react(),
@@ -17,7 +23,10 @@ export default defineConfig({
             sourcemap: true,
             minify: false,
             rollupOptions: {
-              external: ["electron"]
+              external: [
+                ...electronExternals,
+                /^@modelcontextprotocol\/sdk(\/.*)?$/
+              ]
             }
           }
         }
@@ -42,7 +51,14 @@ export default defineConfig({
     port: 54321,
     strictPort: true,
     watch: {
-      usePolling: true
+      // .env 저장 / electron 빌드 산출물로 인한 재시작 폭주 방지
+      ignored: [
+        "**/.env",
+        "**/.env.*",
+        "**/dist-electron/**",
+        "**/node_modules/**",
+        "**/.git/**"
+      ]
     }
   },
   build: {

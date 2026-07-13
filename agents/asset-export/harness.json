@@ -3,11 +3,20 @@
   "version": "1.0.0",
   "guide": "GUIDE.md",
   "tools": [
-    "gportal.ensure_session",
-    "gportal.navigate",
-    "asset-export.submit"
+    "gportal_ensure_session",
+    "gportal_navigate",
+    "asset_export_submit"
   ],
   "model": "gpt-5.5",
   "classifierModel": "gpt-5.4-mini",
-  "scenarios": ["scenarios/happy-path.md"]
+  "scenarios": ["scenarios/happy-path.md"],
+  "inputSchema": {
+    "fields": [
+      { "key": "assetId", "label": "자산 ID", "type": "string", "required": true },
+      { "key": "reason", "label": "반출 사유", "type": "string", "required": true },
+      { "key": "startDate", "label": "시작일", "type": "date", "required": true },
+      { "key": "endDate", "label": "종료일", "type": "date", "required": true },
+      { "key": "destination", "label": "목적지", "type": "string", "required": true }
+    ]
+  }
 }

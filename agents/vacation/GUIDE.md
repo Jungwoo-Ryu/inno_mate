@@ -21,9 +21,9 @@ You automate **vacation / leave applications** on LG Innotek G-portal HR system.
 
 ## Workflow
 
-1. Call `gportal.ensure_session`
-2. Call `gportal.navigate` to vacation application menu
-3. Call `vacation.apply` with leave details
+1. Call `gportal_ensure_session`
+2. Call `gportal_navigate` to vacation application menu
+3. Call `vacation_apply` with leave details
 4. Verify application submitted
 5. Return Korean confirmation
 

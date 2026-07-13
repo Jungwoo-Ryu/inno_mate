@@ -9,21 +9,25 @@ import { OpenAI } from "openai"
 import {
   type APIProvider,
   DEFAULT_MODELS,
+  DEFAULT_AZURE_API_VERSION,
   sanitizeModelSelection
 } from "./aiModels"
 
 interface Config {
-  apiKey: string;
-  apiProvider: "openai" | "gemini" | "anthropic";
-  extractionModel: string;
-  solutionModel: string;
-  debuggingModel: string;
-  language: string;
-  opacity: number;
-  gportalUrl: string;
-  gportalUsername: string;
-  agentModel: string;
-  fontScale: number;
+  apiKey: string
+  apiProvider: APIProvider
+  openaiBaseUrl: string
+  azureEndpoint: string
+  azureApiVersion: string
+  extractionModel: string
+  solutionModel: string
+  debuggingModel: string
+  language: string
+  opacity: number
+  gportalUrl: string
+  gportalUsername: string
+  agentModel: string
+  fontScale: number
 }
 
 /** Runtime config including secrets from .env (password is never written to config.json) */
@@ -38,6 +42,9 @@ export class ConfigHelper extends EventEmitter {
   private defaultConfig: Config = {
     apiKey: "",
     apiProvider: "openai",
+    openaiBaseUrl: "",
+    azureEndpoint: "",
+    azureApiVersion: DEFAULT_AZURE_API_VERSION,
     extractionModel: DEFAULT_MODELS.openai.extraction,
     solutionModel: DEFAULT_MODELS.openai.solution,
     debuggingModel: DEFAULT_MODELS.openai.debugging,
@@ -82,10 +89,20 @@ export class ConfigHelper extends EventEmitter {
    */
   private sanitizeModelSelection(
     model: string,
-    provider: "openai" | "gemini" | "anthropic",
+    provider: APIProvider,
     role: "extraction" | "solution" | "debugging" | "agent" = "solution"
   ): string {
-    return sanitizeModelSelection(model, provider as APIProvider, role)
+    return sanitizeModelSelection(model, provider, role)
+  }
+
+  private normalizeProvider(
+    provider: string | undefined
+  ): APIProvider {
+    if (provider === "azure" || provider === "anthropic" || provider === "openai") {
+      return provider
+    }
+    // 레거시 gemini 제거
+    return "openai"
   }
 
   private applyEnvOverrides(config: Config): RuntimeConfig {
@@ -115,6 +132,17 @@ export class ConfigHelper extends EventEmitter {
     else if (hardcoded.apiProvider && merged.apiKeySource === "hardcoded") {
       merged.apiProvider = hardcoded.apiProvider
     }
+    merged.apiProvider = this.normalizeProvider(merged.apiProvider)
+
+    if (env.openaiBaseUrl) merged.openaiBaseUrl = env.openaiBaseUrl
+    else if (hardcoded.openaiBaseUrl) merged.openaiBaseUrl = hardcoded.openaiBaseUrl
+
+    if (env.azureEndpoint) merged.azureEndpoint = env.azureEndpoint
+    else if (hardcoded.azureEndpoint) merged.azureEndpoint = hardcoded.azureEndpoint
+
+    if (env.azureApiVersion) merged.azureApiVersion = env.azureApiVersion
+    else if (hardcoded.azureApiVersion) merged.azureApiVersion = hardcoded.azureApiVersion
+    if (!merged.azureApiVersion) merged.azureApiVersion = DEFAULT_AZURE_API_VERSION
 
     if (env.gportalUrl) merged.gportalUrl = env.gportalUrl
     else if (hardcoded.gportalUrl) merged.gportalUrl = hardcoded.gportalUrl
@@ -140,35 +168,77 @@ export class ConfigHelper extends EventEmitter {
       let base: Config = { ...this.defaultConfig }
 
       if (fs.existsSync(this.configPath)) {
-        const configData = fs.readFileSync(this.configPath, "utf8");
-        const config = JSON.parse(configData);
-        
-        if (config.apiProvider !== "openai" && config.apiProvider !== "gemini"  && config.apiProvider !== "anthropic") {
-          config.apiProvider = "openai";
+        const configData = fs.readFileSync(this.configPath, "utf8")
+        let config: Partial<Config>
+        try {
+          // BOM / 바이너리 손상 가드
+          const trimmed = configData.replace(/^\uFEFF/, "").trim()
+          if (!trimmed.startsWith("{")) {
+            throw new Error("config.json is not JSON object")
+          }
+          config = JSON.parse(trimmed) as Partial<Config>
+        } catch (parseErr) {
+          console.warn(
+            "Corrupt config.json detected — resetting to defaults:",
+            parseErr
+          )
+          try {
+            const backup = `${this.configPath}.corrupt.${Date.now()}`
+            fs.copyFileSync(this.configPath, backup)
+            console.warn("Backed up corrupt config to:", backup)
+          } catch {
+            /* ignore */
+          }
+          this.saveConfig(this.defaultConfig)
+          return this.applyEnvOverrides({ ...this.defaultConfig })
         }
-        
+
+        if (
+          config.apiProvider !== "openai" &&
+          config.apiProvider !== "azure" &&
+          config.apiProvider !== "anthropic"
+        ) {
+          config.apiProvider = "openai"
+        }
+
         if (config.extractionModel) {
-          config.extractionModel = this.sanitizeModelSelection(config.extractionModel, config.apiProvider, "extraction");
+          config.extractionModel = this.sanitizeModelSelection(
+            config.extractionModel,
+            config.apiProvider!,
+            "extraction"
+          )
         }
         if (config.solutionModel) {
-          config.solutionModel = this.sanitizeModelSelection(config.solutionModel, config.apiProvider, "solution");
+          config.solutionModel = this.sanitizeModelSelection(
+            config.solutionModel,
+            config.apiProvider!,
+            "solution"
+          )
         }
         if (config.debuggingModel) {
-          config.debuggingModel = this.sanitizeModelSelection(config.debuggingModel, config.apiProvider, "debugging");
+          config.debuggingModel = this.sanitizeModelSelection(
+            config.debuggingModel,
+            config.apiProvider!,
+            "debugging"
+          )
         }
         if (config.agentModel) {
-          config.agentModel = this.sanitizeModelSelection(config.agentModel, config.apiProvider, "agent");
+          config.agentModel = this.sanitizeModelSelection(
+            config.agentModel,
+            config.apiProvider!,
+            "agent"
+          )
         }
-        
-        base = { ...this.defaultConfig, ...config };
+
+        base = { ...this.defaultConfig, ...config }
       } else {
-        this.saveConfig(this.defaultConfig);
+        this.saveConfig(this.defaultConfig)
       }
 
-      return this.applyEnvOverrides(base);
+      return this.applyEnvOverrides(base)
     } catch (err) {
-      console.error("Error loading config:", err);
-      return this.applyEnvOverrides(this.defaultConfig);
+      console.error("Error loading config:", err)
+      return this.applyEnvOverrides(this.defaultConfig)
     }
   }
 
@@ -176,8 +246,17 @@ export class ConfigHelper extends EventEmitter {
     if (!fs.existsSync(this.configPath)) {
       return { ...this.defaultConfig }
     }
-    const config = JSON.parse(fs.readFileSync(this.configPath, "utf8"))
-    return { ...this.defaultConfig, ...config }
+    try {
+      const raw = fs.readFileSync(this.configPath, "utf8").replace(/^\uFEFF/, "").trim()
+      if (!raw.startsWith("{")) {
+        throw new Error("invalid config")
+      }
+      const config = JSON.parse(raw) as Partial<Config>
+      return { ...this.defaultConfig, ...config }
+    } catch {
+      this.saveConfig(this.defaultConfig)
+      return { ...this.defaultConfig }
+    }
   }
 
   /**
@@ -203,43 +282,60 @@ export class ConfigHelper extends EventEmitter {
   public updateConfig(updates: Partial<Config>): RuntimeConfig {
     try {
       const currentConfig = this.readConfigFromFile();
-      let provider = updates.apiProvider || currentConfig.apiProvider;
+      let provider = this.normalizeProvider(
+        updates.apiProvider || currentConfig.apiProvider
+      );
       let savedApiKeyToEnv = false;
 
       // Auto-detect provider based on API key format if a new key is provided
       if (updates.apiKey && !updates.apiProvider) {
         if (updates.apiKey.trim().startsWith('sk-ant-')) {
           provider = "anthropic";
-          console.log("Auto-detected Anthropic API key format");
         } else if (updates.apiKey.trim().startsWith('sk-')) {
           provider = "openai";
-          console.log("Auto-detected OpenAI API key format");
-        } else if (updates.apiKey.trim().startsWith('AQ.')) {
-          provider = "gemini";
-          console.log("Auto-detected Gemini API key format");
-        } else {
-          provider = "gemini";
-          console.log("Using Gemini API key format (default)");
         }
-        
+        // Azure keys는 형식이 다양하므로 자동감지하지 않음
         updates.apiProvider = provider;
       }
 
+      if (updates.apiProvider) {
+        updates.apiProvider = this.normalizeProvider(updates.apiProvider)
+        provider = updates.apiProvider
+      }
+
       if (updates.apiKey !== undefined && updates.apiKey.trim()) {
-        saveApiCredentialsToEnvFiles(
-          updates.apiKey.trim(),
-          provider,
-          updates.agentModel ?? updates.solutionModel ?? currentConfig.agentModel
-        );
+        saveApiCredentialsToEnvFiles(updates.apiKey.trim(), provider, {
+          agentModel:
+            updates.agentModel ?? updates.solutionModel ?? currentConfig.agentModel,
+          openaiBaseUrl:
+            updates.openaiBaseUrl ?? currentConfig.openaiBaseUrl,
+          azureEndpoint:
+            updates.azureEndpoint ?? currentConfig.azureEndpoint,
+          azureApiVersion:
+            updates.azureApiVersion ?? currentConfig.azureApiVersion
+        });
         savedApiKeyToEnv = true;
-      } else if (updates.apiProvider && updates.apiProvider !== currentConfig.apiProvider) {
+      } else if (
+        updates.apiProvider ||
+        updates.openaiBaseUrl !== undefined ||
+        updates.azureEndpoint !== undefined ||
+        updates.azureApiVersion !== undefined ||
+        updates.agentModel !== undefined
+      ) {
         const runtimeKey = this.applyEnvOverrides(currentConfig).apiKey?.trim()
         if (runtimeKey) {
-          saveApiCredentialsToEnvFiles(
-            runtimeKey,
-            updates.apiProvider,
-            updates.agentModel ?? updates.solutionModel ?? currentConfig.agentModel
-          );
+          saveApiCredentialsToEnvFiles(runtimeKey, provider, {
+            agentModel:
+              updates.agentModel ??
+              updates.solutionModel ??
+              currentConfig.agentModel,
+            openaiBaseUrl:
+              updates.openaiBaseUrl ?? currentConfig.openaiBaseUrl,
+            azureEndpoint:
+              updates.azureEndpoint ?? currentConfig.azureEndpoint,
+            azureApiVersion:
+              updates.azureApiVersion ?? currentConfig.azureApiVersion
+          });
         }
       }
 
@@ -286,7 +382,9 @@ export class ConfigHelper extends EventEmitter {
       if (updates.apiKey !== undefined || updates.apiProvider !== undefined || 
           updates.extractionModel !== undefined || updates.solutionModel !== undefined || 
           updates.debuggingModel !== undefined || updates.language !== undefined ||
-          updates.gportalUrl !== undefined || updates.gportalUsername !== undefined) {
+          updates.gportalUrl !== undefined || updates.gportalUsername !== undefined ||
+          updates.openaiBaseUrl !== undefined || updates.azureEndpoint !== undefined ||
+          updates.azureApiVersion !== undefined) {
         this.emit('config-updated', runtime);
       }
       
@@ -312,28 +410,22 @@ export class ConfigHelper extends EventEmitter {
   /**
    * Validate the API key format
    */
-  public isValidApiKeyFormat(apiKey: string, provider?: "openai" | "gemini" | "anthropic" ): boolean {
-    // If provider is not specified, attempt to auto-detect
+  public isValidApiKeyFormat(apiKey: string, provider?: APIProvider): boolean {
     if (!provider) {
-      if (apiKey.trim().startsWith('sk-')) {
-        if (apiKey.trim().startsWith('sk-ant-')) {
-          provider = "anthropic";
-        } else {
-          provider = "openai";
-        }
+      if (apiKey.trim().startsWith('sk-ant-')) {
+        provider = "anthropic";
+      } else if (apiKey.trim().startsWith('sk-')) {
+        provider = "openai";
       } else {
-        provider = "gemini";
+        provider = "azure";
       }
     }
     
     if (provider === "openai") {
-      // Basic format validation for OpenAI API keys
-      return /^sk-[a-zA-Z0-9]{32,}$/.test(apiKey.trim());
-    } else if (provider === "gemini") {
-      // Basic format validation for Gemini API keys (usually alphanumeric with no specific prefix)
-      return apiKey.trim().length >= 10; // Assuming Gemini keys are at least 10 chars
+      return apiKey.trim().length >= 20;
+    } else if (provider === "azure") {
+      return apiKey.trim().length >= 16;
     } else if (provider === "anthropic") {
-      // Basic format validation for Anthropic API keys
       return /^sk-ant-[a-zA-Z0-9]{32,}$/.test(apiKey.trim());
     }
     
@@ -375,27 +467,19 @@ export class ConfigHelper extends EventEmitter {
   /**
    * Test API key with the selected provider
    */
-  public async testApiKey(apiKey: string, provider?: "openai" | "gemini" | "anthropic"): Promise<{valid: boolean, error?: string}> {
-    // Auto-detect provider based on key format if not specified
+  public async testApiKey(apiKey: string, provider?: APIProvider): Promise<{valid: boolean, error?: string}> {
     if (!provider) {
-      if (apiKey.trim().startsWith('sk-')) {
-        if (apiKey.trim().startsWith('sk-ant-')) {
-          provider = "anthropic";
-          console.log("Auto-detected Anthropic API key format for testing");
-        } else {
-          provider = "openai";
-          console.log("Auto-detected OpenAI API key format for testing");
-        }
+      if (apiKey.trim().startsWith('sk-ant-')) {
+        provider = "anthropic";
+      } else if (apiKey.trim().startsWith('sk-')) {
+        provider = "openai";
       } else {
-        provider = "gemini";
-        console.log("Using Gemini API key format for testing (default)");
+        provider = "azure";
       }
     }
     
-    if (provider === "openai") {
+    if (provider === "openai" || provider === "azure") {
       return this.testOpenAIKey(apiKey);
-    } else if (provider === "gemini") {
-      return this.testGeminiKey(apiKey);
     } else if (provider === "anthropic") {
       return this.testAnthropicKey(apiKey);
     }
@@ -409,13 +493,11 @@ export class ConfigHelper extends EventEmitter {
   private async testOpenAIKey(apiKey: string): Promise<{valid: boolean, error?: string}> {
     try {
       const openai = new OpenAI({ apiKey });
-      // Make a simple API call to test the key
       await openai.models.list();
       return { valid: true };
     } catch (error: any) {
       console.error('OpenAI API key test failed:', error);
       
-      // Determine the specific error type for better error messages
       let errorMessage = 'Unknown error validating OpenAI API key';
       
       if (error.status === 401) {
@@ -431,42 +513,13 @@ export class ConfigHelper extends EventEmitter {
       return { valid: false, error: errorMessage };
     }
   }
-  
-  /**
-   * Test Gemini API key
-   * Note: This is a simplified implementation since we don't have the actual Gemini client
-   */
-  private async testGeminiKey(apiKey: string): Promise<{valid: boolean, error?: string}> {
-    try {
-      // For now, we'll just do a basic check to ensure the key exists and has valid format
-      // In production, you would connect to the Gemini API and validate the key
-      if (apiKey && apiKey.trim().length >= 20) {
-        // Here you would actually validate the key with a Gemini API call
-        return { valid: true };
-      }
-      return { valid: false, error: 'Invalid Gemini API key format.' };
-    } catch (error: any) {
-      console.error('Gemini API key test failed:', error);
-      let errorMessage = 'Unknown error validating Gemini API key';
-      
-      if (error.message) {
-        errorMessage = `Error: ${error.message}`;
-      }
-      
-      return { valid: false, error: errorMessage };
-    }
-  }
 
   /**
    * Test Anthropic API key
-   * Note: This is a simplified implementation since we don't have the actual Anthropic client
    */
   private async testAnthropicKey(apiKey: string): Promise<{valid: boolean, error?: string}> {
     try {
-      // For now, we'll just do a basic check to ensure the key exists and has valid format
-      // In production, you would connect to the Anthropic API and validate the key
       if (apiKey && /^sk-ant-[a-zA-Z0-9]{32,}$/.test(apiKey.trim())) {
-        // Here you would actually validate the key with an Anthropic API call
         return { valid: true };
       }
       return { valid: false, error: 'Invalid Anthropic API key format.' };

@@ -4,7 +4,8 @@ import { Button } from "../ui/button"
 import { useToast } from "../../contexts/toast"
 import {
   type APIProvider,
-  DEFAULT_MODELS
+  DEFAULT_MODELS,
+  DEFAULT_AZURE_API_VERSION
 } from "../../constants/aiModels"
 import { requestLayoutRemeasure } from "../../hooks/useContentDimensions"
 import { COMMAND_KEY } from "../../utils/platform"
@@ -14,9 +15,9 @@ const PROVIDERS: Array<{
   label: string
   model: string
 }> = [
-  { id: "openai", label: "OpenAI", model: "GPT-5.5" },
-  { id: "gemini", label: "Gemini", model: "Gemini 3.5 Flash" },
-  { id: "anthropic", label: "Claude", model: "Claude Sonnet 4.6" }
+  { id: "openai", label: "OpenAI", model: "GPT / 게이트웨이" },
+  { id: "azure", label: "Azure OpenAI", model: "사내 Azure" },
+  { id: "anthropic", label: "Claude", model: "Anthropic" }
 ]
 
 const SHORTCUTS: Array<{ label: string; keys: string }> = [
@@ -45,6 +46,10 @@ export function SettingsDialog({
   const [isLoading, setIsLoading] = useState(false)
   const [apiKey, setApiKey] = useState("")
   const [apiProvider, setApiProvider] = useState<APIProvider>("openai")
+  const [openaiBaseUrl, setOpenaiBaseUrl] = useState("")
+  const [azureEndpoint, setAzureEndpoint] = useState("")
+  const [azureApiVersion, setAzureApiVersion] = useState(DEFAULT_AZURE_API_VERSION)
+  const [deploymentOrModel, setDeploymentOrModel] = useState("")
 
   useEffect(() => {
     setOpen(externalOpen)
@@ -59,8 +64,8 @@ export function SettingsDialog({
     if (!open) return
 
     void window.electronAPI.setWindowLayoutMode("settings", {
-      width: 420,
-      height: 480
+      width: 440,
+      height: apiProvider === "azure" ? 620 : 560
     })
 
     return () => {
@@ -68,7 +73,7 @@ export function SettingsDialog({
         requestLayoutRemeasure()
       })
     }
-  }, [open])
+  }, [open, apiProvider])
 
   useEffect(() => {
     if (!open) return
@@ -79,9 +84,23 @@ export function SettingsDialog({
       .then((config: {
         apiKey?: string
         apiProvider?: APIProvider
+        openaiBaseUrl?: string
+        azureEndpoint?: string
+        azureApiVersion?: string
+        agentModel?: string
       }) => {
+        const provider =
+          config.apiProvider === "azure" ||
+          config.apiProvider === "anthropic" ||
+          config.apiProvider === "openai"
+            ? config.apiProvider
+            : "openai"
         setApiKey(config.apiKey || "")
-        setApiProvider(config.apiProvider || "openai")
+        setApiProvider(provider)
+        setOpenaiBaseUrl(config.openaiBaseUrl || "")
+        setAzureEndpoint(config.azureEndpoint || "")
+        setAzureApiVersion(config.azureApiVersion || DEFAULT_AZURE_API_VERSION)
+        setDeploymentOrModel(config.agentModel || DEFAULT_MODELS[provider].agent)
       })
       .catch((error: unknown) => {
         console.error("Failed to load config:", error)
@@ -93,15 +112,24 @@ export function SettingsDialog({
   }, [open, showToast])
 
   const handleSave = async () => {
+    if (apiProvider === "azure" && !azureEndpoint.trim()) {
+      showToast("안내", "Azure Endpoint URL을 입력하세요", "neutral")
+      return
+    }
+
     setIsLoading(true)
     try {
       const defaults = DEFAULT_MODELS[apiProvider]
+      const model = deploymentOrModel.trim() || defaults.agent
       const result = await window.electronAPI.updateConfig({
         apiKey,
         apiProvider,
-        agentModel: defaults.agent,
-        extractionModel: defaults.classifier,
-        solutionModel: defaults.agent
+        openaiBaseUrl: openaiBaseUrl.trim(),
+        azureEndpoint: azureEndpoint.trim(),
+        azureApiVersion: azureApiVersion.trim() || DEFAULT_AZURE_API_VERSION,
+        agentModel: model,
+        extractionModel: apiProvider === "azure" ? model : defaults.classifier,
+        solutionModel: model
       })
 
       if (result) {
@@ -124,13 +152,9 @@ export function SettingsDialog({
     return `${key.substring(0, 4)}...${key.substring(key.length - 4)}`
   }
 
-  const canSave = Boolean(apiKey.trim())
-  const keyLabel =
-    apiProvider === "openai"
-      ? "OpenAI API Key"
-      : apiProvider === "gemini"
-        ? "Gemini API Key"
-        : "Anthropic API Key"
+  const canSave =
+    Boolean(apiKey.trim()) &&
+    (apiProvider !== "azure" || Boolean(azureEndpoint.trim()))
 
   if (!open) return null
 
@@ -157,7 +181,10 @@ export function SettingsDialog({
                   <button
                     key={id}
                     type="button"
-                    onClick={() => setApiProvider(id)}
+                    onClick={() => {
+                      setApiProvider(id)
+                      setDeploymentOrModel(DEFAULT_MODELS[id].agent)
+                    }}
                     className={`flex-1 rounded-lg p-2.5 text-left transition-colors ${
                       apiProvider === id
                         ? "border border-white/20 bg-white/10"
@@ -171,9 +198,93 @@ export function SettingsDialog({
               </div>
             </div>
 
+            {apiProvider === "openai" && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-white" htmlFor="baseUrl">
+                  Base URL (선택 · 사내 게이트웨이)
+                </label>
+                <Input
+                  id="baseUrl"
+                  value={openaiBaseUrl}
+                  onChange={(e) => setOpenaiBaseUrl(e.target.value)}
+                  placeholder="https://api.openai.com/v1"
+                  className="border-white/10 bg-black/50 font-mono text-xs text-white"
+                />
+              </div>
+            )}
+
+            {apiProvider === "azure" && (
+              <>
+                <div className="space-y-2">
+                  <label
+                    className="text-sm font-medium text-white"
+                    htmlFor="azureEndpoint"
+                  >
+                    Azure Endpoint
+                  </label>
+                  <Input
+                    id="azureEndpoint"
+                    value={azureEndpoint}
+                    onChange={(e) => setAzureEndpoint(e.target.value)}
+                    placeholder="https://YOUR_RESOURCE.openai.azure.com"
+                    className="border-white/10 bg-black/50 font-mono text-xs text-white"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label
+                    className="text-sm font-medium text-white"
+                    htmlFor="azureVersion"
+                  >
+                    API Version
+                  </label>
+                  <Input
+                    id="azureVersion"
+                    value={azureApiVersion}
+                    onChange={(e) => setAzureApiVersion(e.target.value)}
+                    placeholder={DEFAULT_AZURE_API_VERSION}
+                    className="border-white/10 bg-black/50 font-mono text-xs text-white"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label
+                    className="text-sm font-medium text-white"
+                    htmlFor="deployment"
+                  >
+                    Deployment 이름
+                  </label>
+                  <Input
+                    id="deployment"
+                    value={deploymentOrModel}
+                    onChange={(e) => setDeploymentOrModel(e.target.value)}
+                    placeholder="gpt-4o"
+                    className="border-white/10 bg-black/50 text-white"
+                  />
+                </div>
+              </>
+            )}
+
+            {apiProvider !== "azure" && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-white" htmlFor="model">
+                  Model
+                </label>
+                <Input
+                  id="model"
+                  value={deploymentOrModel}
+                  onChange={(e) => setDeploymentOrModel(e.target.value)}
+                  placeholder={DEFAULT_MODELS[apiProvider].agent}
+                  className="border-white/10 bg-black/50 text-white"
+                />
+              </div>
+            )}
+
             <div className="space-y-2">
               <label className="text-sm font-medium text-white" htmlFor="apiKey">
-                {keyLabel}
+                {apiProvider === "openai"
+                  ? "OpenAI API Key"
+                  : apiProvider === "azure"
+                    ? "Azure OpenAI API Key"
+                    : "Anthropic API Key"}
               </label>
               <Input
                 id="apiKey"
@@ -181,11 +292,7 @@ export function SettingsDialog({
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder={
-                  apiProvider === "openai"
-                    ? "sk-..."
-                    : apiProvider === "gemini"
-                      ? "Gemini API key"
-                      : "sk-ant-..."
+                  apiProvider === "anthropic" ? "sk-ant-..." : "API key"
                 }
                 className="border-white/10 bg-black/50 text-white"
               />

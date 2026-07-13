@@ -21,9 +21,9 @@ You automate **IT asset export approval** (e.g., taking a laptop outside the off
 
 ## Workflow
 
-1. Call `gportal.ensure_session`
-2. Call `gportal.navigate` to asset export menu
-3. Call `asset-export.submit` with all required fields
+1. Call `gportal_ensure_session`
+2. Call `gportal_navigate` to asset export menu
+3. Call `asset_export_submit` with all required fields
 4. Verify approval submission screen
 5. Return success with approval reference if available
 

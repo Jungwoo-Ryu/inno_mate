@@ -82,6 +82,7 @@ function getDb(): Database.Database {
   `)
 
   migrateAgentColumns(db)
+  migrateMcpColumns(db)
   seedAgentsIfEmpty(db)
   ensureVacationHitlDemo(db)
   return db
@@ -138,6 +139,22 @@ function ensureVacationHitlDemo(database: Database.Database): void {
        WHERE id = 'vacation'`
     )
     .run(JSON.stringify(inputSchema), JSON.stringify(graph), new Date().toISOString())
+}
+
+function migrateMcpColumns(database: Database.Database): void {
+  const cols = database.prepare("PRAGMA table_info(mcp_servers)").all() as Array<{
+    name: string
+  }>
+  const names = new Set(cols.map((c) => c.name))
+  const add = (col: string, ddl: string) => {
+    if (!names.has(col)) database.exec(`ALTER TABLE mcp_servers ADD COLUMN ${ddl}`)
+  }
+  add("transport", "transport TEXT NOT NULL DEFAULT 'stdio'")
+  add("command", "command TEXT")
+  add("args_json", "args_json TEXT")
+  add("cwd", "cwd TEXT")
+  add("env_json", "env_json TEXT")
+  add("endpoint_url", "endpoint_url TEXT")
 }
 
 function migrateAgentColumns(database: Database.Database): void {
@@ -396,7 +413,15 @@ export function listMcpServers(): McpServerRecord[] {
     url: row.url as string,
     description: (row.description as string) ?? "",
     enabled: Boolean(row.enabled),
-    updatedAt: row.updated_at as string
+    updatedAt: row.updated_at as string,
+    transport: ((row.transport as string) || "stdio") as McpServerRecord["transport"],
+    command: (row.command as string) || undefined,
+    args: row.args_json ? (JSON.parse(row.args_json as string) as string[]) : undefined,
+    cwd: (row.cwd as string) || undefined,
+    env: row.env_json
+      ? (JSON.parse(row.env_json as string) as Record<string, string>)
+      : undefined,
+    endpointUrl: (row.endpoint_url as string) || undefined
   }))
 }
 
@@ -404,11 +429,18 @@ export function upsertMcpServer(server: Omit<McpServerRecord, "updatedAt">): Mcp
   const now = new Date().toISOString()
   getDb()
     .prepare(
-      `INSERT INTO mcp_servers (id, name, url, description, enabled, updated_at)
-       VALUES (@id, @name, @url, @description, @enabled, @now)
+      `INSERT INTO mcp_servers (
+         id, name, url, description, enabled, updated_at,
+         transport, command, args_json, cwd, env_json, endpoint_url
+       ) VALUES (
+         @id, @name, @url, @description, @enabled, @now,
+         @transport, @command, @args, @cwd, @env, @endpointUrl
+       )
        ON CONFLICT(id) DO UPDATE SET
          name = @name, url = @url, description = @description,
-         enabled = @enabled, updated_at = @now`
+         enabled = @enabled, updated_at = @now,
+         transport = @transport, command = @command, args_json = @args,
+         cwd = @cwd, env_json = @env, endpoint_url = @endpointUrl`
     )
     .run({
       id: server.id,
@@ -416,7 +448,13 @@ export function upsertMcpServer(server: Omit<McpServerRecord, "updatedAt">): Mcp
       url: server.url,
       description: server.description,
       enabled: server.enabled ? 1 : 0,
-      now
+      now,
+      transport: server.transport || "stdio",
+      command: server.command ?? null,
+      args: server.args ? JSON.stringify(server.args) : null,
+      cwd: server.cwd ?? null,
+      env: server.env ? JSON.stringify(server.env) : null,
+      endpointUrl: server.endpointUrl ?? null
     })
   return { ...server, updatedAt: now }
 }
@@ -508,36 +546,81 @@ export function setSetting(key: string, value: string): void {
 }
 
 export function getOpenAISettings(): {
+  provider: "openai" | "azure"
   baseUrl: string
   apiKey: string
   model: string
+  azureEndpoint: string
+  azureApiVersion: string
   hasApiKey: boolean
 } {
+  const providerRaw = (
+    getSetting("openai_provider")?.trim() ||
+    process.env.INNOMATE_API_PROVIDER?.trim() ||
+    "openai"
+  ).toLowerCase()
+  const provider: "openai" | "azure" =
+    providerRaw === "azure" ? "azure" : "openai"
+
   const baseUrl =
     getSetting("openai_base_url")?.trim() ||
     process.env.OPENAI_BASE_URL?.trim() ||
     ""
+  const azureEndpoint =
+    getSetting("azure_openai_endpoint")?.trim() ||
+    process.env.AZURE_OPENAI_ENDPOINT?.trim() ||
+    ""
+  const azureApiVersion =
+    getSetting("azure_openai_api_version")?.trim() ||
+    process.env.AZURE_OPENAI_API_VERSION?.trim() ||
+    "2024-10-21"
   const apiKey =
     getSetting("openai_api_key")?.trim() ||
+    (provider === "azure"
+      ? process.env.AZURE_OPENAI_API_KEY?.trim()
+      : undefined) ||
     process.env.OPENAI_API_KEY?.trim() ||
     ""
   const model =
     getSetting("openai_model")?.trim() ||
+    process.env.AZURE_OPENAI_DEPLOYMENT?.trim() ||
     process.env.OPENAI_MODEL?.trim() ||
-    "gpt-5.5"
-  return { baseUrl, apiKey, model, hasApiKey: Boolean(apiKey) }
+    (provider === "azure" ? "gpt-4o" : "gpt-5.5")
+  return {
+    provider,
+    baseUrl,
+    azureEndpoint,
+    azureApiVersion,
+    apiKey,
+    model,
+    hasApiKey: Boolean(apiKey)
+  }
 }
 
 export function saveOpenAISettings(input: {
+  provider?: "openai" | "azure"
   baseUrl?: string
   apiKey?: string
   model?: string
+  azureEndpoint?: string
+  azureApiVersion?: string
 }): void {
+  if (input.provider !== undefined) {
+    setSetting("openai_provider", input.provider)
+  }
   if (input.baseUrl !== undefined) {
     setSetting("openai_base_url", input.baseUrl.trim())
   }
+  if (input.azureEndpoint !== undefined) {
+    setSetting("azure_openai_endpoint", input.azureEndpoint.trim().replace(/\/$/, ""))
+  }
+  if (input.azureApiVersion !== undefined) {
+    setSetting(
+      "azure_openai_api_version",
+      input.azureApiVersion.trim() || "2024-10-21"
+    )
+  }
   if (input.apiKey !== undefined && input.apiKey.trim()) {
-    // 빈 문자열이면 기존 키 유지 (UI에서 •••• 마스킹 후 미변경)
     setSetting("openai_api_key", input.apiKey.trim())
   }
   if (input.model !== undefined) {
