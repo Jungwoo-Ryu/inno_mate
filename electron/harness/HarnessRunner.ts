@@ -1,9 +1,24 @@
+import { randomUUID } from "node:crypto"
 import { OpenAI } from "openai"
 import type { ChatCompletionTool } from "openai/resources/chat/completions"
 import { harnessLoader } from "./HarnessLoader"
 import { classifyIntent, classifyIntentFromText } from "./IntentClassifier"
-import type { AgentRunResult, AttachmentPayload, LoadedHarness, ScreenshotPayload } from "./types"
+import {
+  formatMissingMessage,
+  missingRequiredFields,
+  resolveMissingFieldDefs
+} from "./hitl"
+import type {
+  AgentRunResult,
+  AttachmentPayload,
+  LoadedHarness,
+  ScreenshotPayload
+} from "./types"
 import { getGPortalTools, executeGPortalTool } from "../gportal/tools"
+import {
+  executeCachedMcpTool,
+  getCachedMcpToolsForSuper
+} from "../mcp/McpToolRegistry"
 import { configHelper } from "../ConfigHelper"
 import { DEFAULT_MODELS } from "../aiModels"
 
@@ -25,9 +40,72 @@ function isAbortError(error: unknown): boolean {
 
 function buildTools(harness: LoadedHarness): ChatCompletionTool[] {
   const allTools = getGPortalTools()
-  return harness.config.tools
+  const gportal = harness.config.tools
     .map((name) => allTools.find((t) => t.function.name === name))
     .filter((t): t is ChatCompletionTool => t !== undefined)
+
+  // Super Agent에만 캐시된 MCP tools 노출
+  if (harness.config.id !== "super") return gportal
+
+  const { tools: mcpTools } = getCachedMcpToolsForSuper()
+  if (mcpTools.length > 0) {
+    console.log(
+      `[HarnessRunner] Super Agent + ${mcpTools.length} cached MCP tools`
+    )
+  }
+  return [...gportal, ...mcpTools]
+}
+
+function enrichNeedsInput(
+  harness: LoadedHarness,
+  result: AgentRunResult,
+  collected: Record<string, unknown>
+): AgentRunResult {
+  const defs = resolveMissingFieldDefs(
+    harness.config.inputSchema,
+    result.missingFieldDefs ?? result.missingFields
+  )
+  const missing =
+    defs.length > 0
+      ? defs
+      : missingRequiredFields(harness.config.inputSchema, collected)
+
+  if (result.status !== "needs_input" && missing.length === 0) {
+    return result
+  }
+
+  const finalMissing =
+    missing.length > 0
+      ? missing
+      : resolveMissingFieldDefs(harness.config.inputSchema, result.missingFields)
+
+  return {
+    ...result,
+    status: "needs_input",
+    runId: result.runId ?? randomUUID(),
+    collectedFields: collected,
+    missingFieldDefs: finalMissing,
+    missingFields: finalMissing.map((f) => f.key),
+    message_ko:
+      result.message_ko?.trim() || formatMissingMessage(finalMissing)
+  }
+}
+
+function pauseForMissing(
+  harness: LoadedHarness,
+  collected: Record<string, unknown>
+): AgentRunResult | null {
+  const missing = missingRequiredFields(harness.config.inputSchema, collected)
+  if (!missing.length) return null
+  return {
+    status: "needs_input",
+    agentId: harness.config.id,
+    runId: randomUUID(),
+    message_ko: formatMissingMessage(missing),
+    collectedFields: collected,
+    missingFieldDefs: missing,
+    missingFields: missing.map((f) => f.key)
+  }
 }
 
 export class HarnessRunner {
@@ -78,12 +156,20 @@ export class HarnessRunner {
       extractedFields = classification.extractedFields
 
       if (classification.confidence < 0.4) {
+        const lowHarness = harnessLoader.loadHarness(classification.agentId)
+        const defs = resolveMissingFieldDefs(
+          lowHarness?.config.inputSchema,
+          Object.keys(extractedFields)
+        )
         return {
           status: "needs_input",
           agentId: classification.agentId,
+          runId: randomUUID(),
           message_ko:
             "화면을 정확히 파악하지 못했습니다. G-portal 업무 화면을 캡처했는지 확인하거나, 프롬프트를 입력해 주세요.",
-          missingFields: Object.keys(extractedFields)
+          missingFields: defs.map((f) => f.key),
+          missingFieldDefs: defs,
+          collectedFields: extractedFields
         }
       }
     }
@@ -97,7 +183,65 @@ export class HarnessRunner {
       }
     }
 
-    return this.runHarness(harness, screenshots, userPrompt, extractedFields, attachments, signal)
+    return this.runHarness(
+      harness,
+      screenshots,
+      userPrompt,
+      extractedFields,
+      attachments,
+      signal
+    )
+  }
+
+  /**
+   * HITL resume: collectedFields에 사용자 입력을 merge한 뒤
+   * 아직 누락이면 다시 needs_input, 충족이면 harness 재실행.
+   */
+  async resumeWithFields(
+    agentId: string,
+    collectedFields: Record<string, unknown>,
+    addedFields: Record<string, unknown>,
+    screenshots: ScreenshotPayload[] = [],
+    userPrompt?: string,
+    attachments: AttachmentPayload[] = [],
+    signal?: AbortSignal
+  ): Promise<AgentRunResult> {
+    throwIfAborted(signal)
+    const harness = harnessLoader.loadHarness(agentId)
+    if (!harness) {
+      return {
+        status: "error",
+        agentId,
+        message_ko: `에이전트 '${agentId}' 설정을 찾을 수 없습니다.`
+      }
+    }
+
+    const collected = { ...collectedFields, ...addedFields }
+    const paused = pauseForMissing(harness, collected)
+    if (paused) return paused
+
+    const fieldsNote = `User-provided fields (HITL): ${JSON.stringify(collected)}`
+    const mergedPrompt = [userPrompt?.trim(), fieldsNote].filter(Boolean).join("\n\n")
+
+    const result = await this.runHarness(
+      harness,
+      screenshots,
+      mergedPrompt,
+      collected as Record<string, string>,
+      attachments,
+      signal,
+      collected,
+      /* skipPrecheck */ true
+    )
+
+    if (result.status === "needs_input") {
+      return enrichNeedsInput(harness, result, {
+        ...collected,
+        ...(result.collectedFields ?? {})
+      })
+    }
+
+    return { ...result, collectedFields: collected, runId: result.runId }
   }
 
   /**
@@ -250,13 +394,34 @@ export class HarnessRunner {
     userPrompt?: string,
     extractedFields?: Record<string, string>,
     attachments: AttachmentPayload[] = [],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    priorCollected?: Record<string, unknown>,
+    skipPrecheck = false
   ): Promise<AgentRunResult> {
     if (!this.client) {
       return {
         status: "error",
         agentId: harness.config.id,
         message_ko: "OpenAI 클라이언트가 초기화되지 않았습니다."
+      }
+    }
+
+    const collected: Record<string, unknown> = {
+      ...(priorCollected ?? {}),
+      ...(extractedFields ?? {})
+    }
+
+    // Super는 라우터라 inputSchema HITL precheck 생략 — 서브 에이전트만
+    if (!skipPrecheck && harness.config.id !== "super") {
+      const paused = pauseForMissing(harness, collected)
+      // 스크린샷만 있고 필드가 비면 LLM이 화면에서 추출하도록 통과.
+      // 프롬프트/첨부만으로 서브 에이전트에 바로 들어온 경우(라우팅 후)는
+      // 추출 필드가 있을 때만 precheck. 필드가 전혀 없고 schema만 있으면 LLM에 맡김.
+      const hasAnyCollected = Object.values(collected).some(
+        (v) => v !== undefined && v !== null && String(v).trim() !== ""
+      )
+      if (paused && hasAnyCollected) {
+        return paused
       }
     }
 
@@ -273,7 +438,15 @@ export class HarnessRunner {
       }
     ]
 
-    return this.runToolLoop(harness, messages, signal)
+    const result = await this.runToolLoop(harness, messages, signal)
+    if (result.status === "needs_input") {
+      return enrichNeedsInput(harness, result, {
+        ...collected,
+        ...(result.data ?? {}),
+        ...(result.collectedFields ?? {})
+      })
+    }
+    return { ...result, collectedFields: collected }
   }
 
   /** 공용 툴 실행 루프: harness의 도구를 호출하며 최종 결과를 반환 */
@@ -322,7 +495,10 @@ export class HarnessRunner {
           throwIfAborted(signal)
           if (call.type !== "function") continue
           const args = JSON.parse(call.function.arguments || "{}")
-          const toolResult = await executeGPortalTool(call.function.name, args)
+          const name = call.function.name
+          const toolResult = name.startsWith("mcp_")
+            ? await executeCachedMcpTool(name, args)
+            : await executeGPortalTool(name, args)
           messages.push({
             role: "tool",
             tool_call_id: call.id,

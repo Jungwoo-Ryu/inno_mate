@@ -1,14 +1,20 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Plug, Plus, Trash2 } from "lucide-react"
+import { FileJson, Plug, Plus, Trash2 } from "lucide-react"
 import type { McpServerRecord } from "@/lib/types"
 
 export default function McpPage() {
   const [servers, setServers] = useState<McpServerRecord[]>([])
   const [showForm, setShowForm] = useState(false)
-  const [name, setName] = useState("")
-  const [url, setUrl] = useState("")
+  const [name, setName] = useState("demo-mcp")
+  const [transport, setTransport] = useState<"stdio" | "http" | "sse">("http")
+  const [command, setCommand] = useState("uv")
+  const [argsText, setArgsText] = useState(
+    "run\n--directory\n/Users/wassabik/Desktop/innotek/mcp\ndemo-mcp"
+  )
+  const [cwd, setCwd] = useState("")
+  const [url, setUrl] = useState("http://127.0.0.1:8000/mcp")
   const [description, setDescription] = useState("")
   const [error, setError] = useState<string | null>(null)
 
@@ -18,26 +24,69 @@ export default function McpPage() {
   }, [])
 
   useEffect(() => {
-    load()
+    void load()
   }, [load])
 
   const add = async () => {
     setError(null)
+    const args = argsText
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)
     const res = await fetch("/api/mcp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, url, description })
+      body: JSON.stringify({
+        name,
+        description,
+        transport,
+        command: transport === "stdio" ? command : undefined,
+        args: transport === "stdio" ? args : undefined,
+        cwd: transport === "stdio" ? cwd || undefined : undefined,
+        url: transport === "stdio" ? `stdio://${name}` : url,
+        endpointUrl: transport !== "stdio" ? url : undefined
+      })
     })
     if (!res.ok) {
       const data = (await res.json().catch(() => null)) as { error?: string } | null
       setError(data?.error ?? "추가에 실패했습니다")
       return
     }
-    setName("")
-    setUrl("")
-    setDescription("")
     setShowForm(false)
-    load()
+    void load()
+  }
+
+  const importJson = async () => {
+    const raw = window.prompt("Cursor mcp.json 붙여넣기")
+    if (!raw?.trim()) return
+    try {
+      const parsed = JSON.parse(raw) as {
+        mcpServers?: Record<
+          string,
+          { command?: string; args?: string[]; cwd?: string; url?: string }
+        >
+      }
+      const entries = parsed.mcpServers ?? {}
+      for (const [id, entry] of Object.entries(entries)) {
+        await fetch("/api/mcp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: id,
+            transport: entry.command ? "stdio" : "http",
+            command: entry.command,
+            args: entry.args,
+            cwd: entry.cwd,
+            url: entry.url || (entry.command ? `stdio://${id}` : ""),
+            endpointUrl: entry.url,
+            enabled: true
+          })
+        })
+      }
+      void load()
+    } catch {
+      setError("JSON 파싱 실패")
+    }
   }
 
   const toggle = async (server: McpServerRecord) => {
@@ -46,13 +95,13 @@ export default function McpPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...server, enabled: !server.enabled })
     })
-    load()
+    void load()
   }
 
   const remove = async (server: McpServerRecord) => {
     if (!confirm(`'${server.name}' 연결을 삭제할까요?`)) return
     await fetch(`/api/mcp/${server.id}`, { method: "DELETE" })
-    load()
+    void load()
   }
 
   return (
@@ -61,17 +110,27 @@ export default function McpPage() {
         <div>
           <h2 className="text-[16px] font-semibold text-white/90">MCP 연결 관리</h2>
           <p className="mt-0.5 text-[12px] text-white/40">
-            연결 프로필만 저장됩니다 — stdio 실행·자격증명은 데스크톱 앱 로컬에서 처리
+            Cursor mcp.json 호환 (command/args/cwd 또는 URL) — 실행·테스트는 데스크톱에서
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowForm((v) => !v)}
-          className="glass-button-primary flex items-center gap-1.5"
-        >
-          <Plus className="h-4 w-4" />
-          연결 추가
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => void importJson()}
+            className="glass-button flex items-center gap-1.5"
+          >
+            <FileJson className="h-4 w-4" />
+            JSON 가져오기
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowForm((v) => !v)}
+            className="glass-button-primary flex items-center gap-1.5"
+          >
+            <Plus className="h-4 w-4" />
+            연결 추가
+          </button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
@@ -86,16 +145,51 @@ export default function McpPage() {
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="이름 (예: Jira MCP)"
+                placeholder="이름 (예: demo-mcp)"
                 className="glass-input"
               />
+              <select
+                value={transport}
+                onChange={(e) =>
+                  setTransport(e.target.value as "stdio" | "http" | "sse")
+                }
+                className="glass-input"
+              >
+                <option value="stdio">stdio (command/args)</option>
+                <option value="http">http</option>
+                <option value="sse">sse</option>
+              </select>
+            </div>
+            {transport === "stdio" ? (
+              <>
+                <input
+                  value={command}
+                  onChange={(e) => setCommand(e.target.value)}
+                  placeholder="command (uv)"
+                  className="glass-input font-mono text-[12px]"
+                />
+                <textarea
+                  value={argsText}
+                  onChange={(e) => setArgsText(e.target.value)}
+                  rows={4}
+                  placeholder={"args 줄바꿈\nrun\n--directory\n/path\ndemo-mcp"}
+                  className="glass-input w-full font-mono text-[12px]"
+                />
+                <input
+                  value={cwd}
+                  onChange={(e) => setCwd(e.target.value)}
+                  placeholder="cwd (선택)"
+                  className="glass-input font-mono text-[12px]"
+                />
+              </>
+            ) : (
               <input
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="URL (https://... 또는 stdio://...)"
-                className="glass-input"
+                placeholder="http://127.0.0.1:8000/mcp"
+                className="glass-input font-mono text-[12px]"
               />
-            </div>
+            )}
             <input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -106,7 +200,7 @@ export default function McpPage() {
               <button type="button" onClick={() => setShowForm(false)} className="glass-button">
                 취소
               </button>
-              <button type="button" onClick={add} className="glass-button-primary">
+              <button type="button" onClick={() => void add()} className="glass-button-primary">
                 저장
               </button>
             </div>
@@ -125,20 +219,24 @@ export default function McpPage() {
                 className="glass-inset flex items-center gap-3 px-4 py-3"
               >
                 <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-white/[0.07]">
-                  <Plug className="h-4.5 w-4.5 h-[18px] w-[18px] text-white/60" />
+                  <Plug className="h-[18px] w-[18px] text-white/60" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13.5px] font-medium text-white/90">
-                    {server.name}
+                    {server.name}{" "}
+                    <span className="text-[11px] font-normal text-white/35">
+                      {server.transport || "stdio"}
+                    </span>
                   </p>
-                  <p className="truncate text-[11px] text-white/40">
-                    {server.url}
-                    {server.description ? ` — ${server.description}` : ""}
+                  <p className="truncate font-mono text-[11px] text-white/40">
+                    {server.command
+                      ? `${server.command} ${(server.args ?? []).join(" ")}`
+                      : server.endpointUrl || server.url}
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => toggle(server)}
+                  onClick={() => void toggle(server)}
                   className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
                     server.enabled ? "bg-emerald-500/80" : "bg-white/15"
                   }`}
@@ -152,7 +250,7 @@ export default function McpPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => remove(server)}
+                  onClick={() => void remove(server)}
                   className="flex-shrink-0 rounded-xl p-2 text-white/40 transition-colors hover:bg-red-500/15 hover:text-red-300"
                   title="삭제"
                 >

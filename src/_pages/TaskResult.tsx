@@ -90,7 +90,10 @@ const TaskResult: React.FC<TaskResultProps> = ({ setView }) => {
 
         <div className="px-4 pb-4 flex justify-center">
           <button
-            onClick={() => setView("queue")}
+            onClick={() => {
+              setView("queue")
+              void window.electronAPI.triggerReset()
+            }}
             className="text-[12px] px-4 py-2 rounded-full bg-white/10 hover:bg-white/15 active:scale-[0.97] text-white/80 transition-all"
           >
             새 업무 ({COMMAND_KEY}+R)

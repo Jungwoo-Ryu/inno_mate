@@ -54,7 +54,7 @@ export class StubGPortalAdapter implements IGPortalAdapter {
   async searchMeetingRoom(
     params: MeetingRoomSearchParams
   ): Promise<GPortalToolResult> {
-    console.log("[StubGPortal] meeting-room.search:", params)
+    console.log("[StubGPortal] meeting_room_search:", params)
     return {
       success: true,
       rooms: [{ name: "3층 회의실A", available: true }],
@@ -65,7 +65,7 @@ export class StubGPortalAdapter implements IGPortalAdapter {
   async reserveMeetingRoom(
     params: MeetingRoomReserveParams
   ): Promise<GPortalToolResult> {
-    console.log("[StubGPortal] meeting-room.reserve:", params)
+    console.log("[StubGPortal] meeting_room_reserve:", params)
     return {
       success: true,
       reservationId: `RES-STUB-${Date.now()}`,
@@ -77,7 +77,7 @@ export class StubGPortalAdapter implements IGPortalAdapter {
   async submitAssetExport(
     params: AssetExportParams
   ): Promise<GPortalToolResult> {
-    console.log("[StubGPortal] asset-export.submit:", params)
+    console.log("[StubGPortal] asset_export_submit:", params)
     return {
       success: true,
       approvalId: `APR-STUB-${Date.now()}`,
@@ -87,7 +87,7 @@ export class StubGPortalAdapter implements IGPortalAdapter {
   }
 
   async applyVacation(params: VacationApplyParams): Promise<GPortalToolResult> {
-    console.log("[StubGPortal] vacation.apply:", params)
+    console.log("[StubGPortal] vacation_apply:", params)
     return {
       success: true,
       applicationId: `LV-STUB-${Date.now()}`,

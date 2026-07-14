@@ -25,10 +25,10 @@ Analyze screenshots to extract reservation details and execute booking via Playw
 
 ## Workflow
 
-1. Call `gportal.ensure_session`
-2. Call `gportal.navigate` with menu path for meeting room reservation
-3. Call `meeting-room.search` with date, startTime, endTime
-4. If roomName provided, call `meeting-room.reserve` with selected room
+1. Call `gportal_ensure_session`
+2. Call `gportal_navigate` with menu path for meeting room reservation
+3. Call `meeting_room_search` with date, startTime, endTime
+4. If roomName provided, call `meeting_room_reserve` with selected room
 5. If roomName missing, pick the first available room and confirm with user via `needs_input` if multiple options
 6. Verify confirmation screen and return success
 

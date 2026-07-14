@@ -59,7 +59,6 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
         }
       }),
       window.electronAPI.onAgentRunError((error: string) => {
-        showToast("오류", "처리 중 문제가 발생했습니다", "error")
         setView("queue")
         console.error("Agent error:", error)
       }),

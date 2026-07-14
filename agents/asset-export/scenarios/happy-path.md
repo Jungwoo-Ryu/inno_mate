@@ -11,9 +11,9 @@
 
 ## Expected Tool Sequence
 
-1. `gportal.ensure_session`
-2. `gportal.navigate` → "IT자산 > 자산 반출 신청"
-3. `asset-export.submit` → assetId, reason, dates, destination
+1. `gportal_ensure_session`
+2. `gportal_navigate` → "IT자산 > 자산 반출 신청"
+3. `asset_export_submit` → assetId, reason, dates, destination
 
 ## Expected Output (Korean)
 

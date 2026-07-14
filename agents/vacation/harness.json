@@ -3,11 +3,26 @@
   "version": "1.0.0",
   "guide": "GUIDE.md",
   "tools": [
-    "gportal.ensure_session",
-    "gportal.navigate",
-    "vacation.apply"
+    "gportal_ensure_session",
+    "gportal_navigate",
+    "vacation_apply"
   ],
   "model": "gpt-5.5",
   "classifierModel": "gpt-5.4-mini",
-  "scenarios": ["scenarios/happy-path.md"]
+  "scenarios": ["scenarios/happy-path.md"],
+  "inputSchema": {
+    "fields": [
+      { "key": "startDate", "label": "시작일", "type": "date", "required": true },
+      { "key": "endDate", "label": "종료일", "type": "date", "required": true },
+      {
+        "key": "leaveType",
+        "label": "휴가 유형",
+        "type": "enum",
+        "required": true,
+        "enumValues": ["연차", "반차", "병가", "경조사"]
+      },
+      { "key": "reason", "label": "사유", "type": "string", "required": false },
+      { "key": "substitute", "label": "대직자", "type": "string", "required": false }
+    ]
+  }
 }

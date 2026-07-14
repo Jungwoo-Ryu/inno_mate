@@ -71,6 +71,12 @@ export interface McpServerRecord {
   description: string
   enabled: boolean
   updatedAt: string
+  transport?: "stdio" | "http" | "sse"
+  command?: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string>
+  endpointUrl?: string
 }
 
 export interface RunRecord {

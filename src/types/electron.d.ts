@@ -23,6 +23,14 @@ export interface ElectronAPI {
   onAgentRunError: (callback: (error: string) => void) => () => void
   onProcessingNoScreenshots: (callback: () => void) => () => void
   onAgentRunSuccess: (callback: (data: unknown) => void) => () => void
+  onAgentUserTurn: (
+    callback: (data: {
+      content?: string
+      screenshotCount?: number
+      attachmentCount?: number
+      hitlResume?: boolean
+    }) => void
+  ) => () => void
   openExternal: (url: string) => void
   toggleMainWindow: () => Promise<{ success: boolean; error?: string }>
   triggerScreenshot: () => Promise<{ success: boolean; error?: string }>
@@ -34,10 +42,49 @@ export interface ElectronAPI {
   openAgentsDirectory: () => Promise<{ success: boolean }>
   syncWebAgents: () => Promise<{ success: boolean; synced: string[]; error?: string }>
   openWebPortal: () => Promise<{ success: boolean }>
-  getMcpServers: () => Promise<McpServerConfig[]>
-  saveMcpServers: (servers: McpServerConfig[]) => Promise<McpServerConfig[]>
-  testMcpConnection: (server: McpServerConfig) => Promise<{ ok: boolean; error?: string }>
+  getMcpServers: () => Promise<import("./agents").McpServerConfig[]>
+  saveMcpServers: (
+    servers: import("./agents").McpServerConfig[]
+  ) => Promise<import("./agents").McpServerConfig[]>
+  testMcpConnection: (
+    server: import("./agents").McpServerConfig
+  ) => Promise<{
+    ok: boolean
+    error?: string
+    tools?: {
+      name: string
+      description?: string
+      paramKeys?: string[]
+      inputSchema?: Record<string, unknown>
+    }[]
+  }>
+  refreshMcpTools: () => Promise<{
+    ok: boolean
+    refreshed: Array<{
+      id: string
+      name: string
+      toolCount: number
+      error?: string
+    }>
+    error?: string
+  }>
+  getMcpToolCache: () => Promise<
+    Array<{
+      serverId: string
+      serverName: string
+      toolCount: number
+      tools: Array<{ name: string; description?: string; openAiName: string }>
+    }>
+  >
+  importCursorMcpJson: (json: unknown) => Promise<{
+    success: boolean
+    servers?: import("./agents").McpServerConfig[]
+    error?: string
+  }>
   triggerProcessScreenshots: (prompt?: string) => Promise<{ success: boolean; error?: string }>
+  resumeAgentRun: (
+    fields: Record<string, string>
+  ) => Promise<{ success: boolean; error?: string }>
   triggerReset: () => Promise<{ success: boolean; error?: string }>
   triggerMoveLeft: () => Promise<{ success: boolean; error?: string }>
   triggerMoveRight: () => Promise<{ success: boolean; error?: string }>

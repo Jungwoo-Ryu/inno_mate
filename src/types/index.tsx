@@ -5,10 +5,4 @@ export interface Screenshot {
   thumbnail: string
 }
 
-export interface AgentTaskResult {
-  agentId: string
-  status: string
-  message_ko: string
-  data?: Record<string, unknown>
-  missingFields?: string[]
-}
+export type { AgentTaskResult, DisplayMessage, InputField } from "./chat"

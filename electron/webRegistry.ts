@@ -14,6 +14,15 @@ interface WebAgentRecord {
   classifierModel: string
   enabled: boolean
   updatedAt: string
+  inputSchema?: {
+    fields: Array<{
+      key: string
+      label: string
+      type: string
+      required: boolean
+      enumValues?: string[]
+    }>
+  }
 }
 
 export function getWebBaseUrl(): string {
@@ -80,7 +89,8 @@ export async function syncAgentsFromWeb(): Promise<SyncResult> {
             model: agent.model ?? "gpt-5.5",
             classifierModel: agent.classifierModel ?? "gpt-5.4-mini",
             delegates: agent.delegates ?? [],
-            scenarios: []
+            scenarios: [],
+            ...(agent.inputSchema ? { inputSchema: agent.inputSchema } : {})
           },
           null,
           2

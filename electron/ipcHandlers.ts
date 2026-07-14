@@ -10,8 +10,11 @@ import {
   getMcpServers,
   saveMcpServers,
   testMcpConnection,
+  importCursorMcpJson,
+  refreshAllMcpToolCaches,
   type McpServerConfig
 } from "./mcp/McpStore"
+import { summarizeCachedMcpTools } from "./mcp/McpToolRegistry"
 import { DEFAULT_MODELS } from "./aiModels"
 import { getWebBaseUrl, syncAgentsFromWeb } from "./webRegistry"
 
@@ -290,6 +293,49 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
     return result
   })
 
+  ipcMain.handle("refresh-mcp-tools", async () => {
+    try {
+      return await refreshAllMcpToolCaches()
+    } catch (err) {
+      return {
+        ok: false,
+        refreshed: [],
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  ipcMain.handle("get-mcp-tool-cache", () => {
+    return summarizeCachedMcpTools()
+  })
+
+  ipcMain.handle("import-cursor-mcp-json", (_event, json: unknown) => {
+    try {
+      return {
+        success: true,
+        servers: importCursorMcpJson(
+          (json ?? {}) as {
+            mcpServers?: Record<
+              string,
+              {
+                command?: string
+                args?: string[]
+                cwd?: string
+                env?: Record<string, string>
+                url?: string
+              }
+            >
+          }
+        )
+      }
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
   // Process screenshot handlers
   ipcMain.handle("trigger-process-screenshots", async (_event, prompt?: string) => {
     try {
@@ -312,6 +358,24 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
       return { error: "Failed to process screenshots" }
     }
   })
+
+  ipcMain.handle(
+    "resume-agent-run",
+    async (_event, fields: Record<string, string>) => {
+      try {
+        if (!deps.processingHelper) {
+          return { success: false, error: "Orchestrator not ready" }
+        }
+        return await deps.processingHelper.resumePausedRun(fields ?? {})
+      } catch (error) {
+        console.error("Error resuming agent run:", error)
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      }
+    }
+  )
 
   // Reset handlers
   ipcMain.handle("trigger-reset", () => {

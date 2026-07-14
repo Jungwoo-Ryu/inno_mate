@@ -3,12 +3,21 @@
   "version": "1.0.0",
   "guide": "GUIDE.md",
   "tools": [
-    "gportal.ensure_session",
-    "gportal.navigate",
-    "meeting-room.search",
-    "meeting-room.reserve"
+    "gportal_ensure_session",
+    "gportal_navigate",
+    "meeting_room_search",
+    "meeting_room_reserve"
   ],
   "model": "gpt-5.5",
   "classifierModel": "gpt-5.4-mini",
-  "scenarios": ["scenarios/happy-path.md"]
+  "scenarios": ["scenarios/happy-path.md"],
+  "inputSchema": {
+    "fields": [
+      { "key": "date", "label": "날짜", "type": "date", "required": true },
+      { "key": "startTime", "label": "시작 시간", "type": "string", "required": true },
+      { "key": "endTime", "label": "종료 시간", "type": "string", "required": true },
+      { "key": "roomName", "label": "회의실", "type": "string", "required": false },
+      { "key": "title", "label": "회의 제목", "type": "string", "required": false }
+    ]
+  }
 }

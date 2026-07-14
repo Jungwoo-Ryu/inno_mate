@@ -28,8 +28,9 @@ You receive user prompts (Korean or English) and screenshots, then delegate to t
 
 ## Tool Usage Rules
 
-- Call `gportal.ensure_session` before any G-portal operation
+- Call `gportal_ensure_session` before any G-portal operation
 - Call domain tools in logical order for compound tasks
+- MCP tools (names starting with `mcp_`) are available when connected MCP servers have cached tools — use them for external integrations
 - If a required field is missing, return `needs_input` with Korean question
 
 ## Success Criteria

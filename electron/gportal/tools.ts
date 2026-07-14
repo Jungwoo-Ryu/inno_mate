@@ -1,12 +1,13 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions"
 import { gportalSession } from "./GPortalSession"
 
+/** OpenAI function.name은 ^[a-zA-Z0-9_-]+$ 만 허용 (`.` 불가) */
 export function getGPortalTools(): ChatCompletionTool[] {
   return [
     {
       type: "function",
       function: {
-        name: "gportal.ensure_session",
+        name: "gportal_ensure_session",
         description: "Ensure G-portal browser session is logged in",
         parameters: { type: "object", properties: {}, additionalProperties: false }
       }
@@ -14,7 +15,7 @@ export function getGPortalTools(): ChatCompletionTool[] {
     {
       type: "function",
       function: {
-        name: "gportal.navigate",
+        name: "gportal_navigate",
         description: "Navigate to a G-portal menu path",
         parameters: {
           type: "object",
@@ -29,7 +30,7 @@ export function getGPortalTools(): ChatCompletionTool[] {
     {
       type: "function",
       function: {
-        name: "meeting-room.search",
+        name: "meeting_room_search",
         description: "Search available meeting rooms",
         parameters: {
           type: "object",
@@ -46,7 +47,7 @@ export function getGPortalTools(): ChatCompletionTool[] {
     {
       type: "function",
       function: {
-        name: "meeting-room.reserve",
+        name: "meeting_room_reserve",
         description: "Reserve a meeting room",
         parameters: {
           type: "object",
@@ -65,7 +66,7 @@ export function getGPortalTools(): ChatCompletionTool[] {
     {
       type: "function",
       function: {
-        name: "asset-export.submit",
+        name: "asset_export_submit",
         description: "Submit asset export approval request",
         parameters: {
           type: "object",
@@ -84,7 +85,7 @@ export function getGPortalTools(): ChatCompletionTool[] {
     {
       type: "function",
       function: {
-        name: "vacation.apply",
+        name: "vacation_apply",
         description: "Submit vacation leave application",
         parameters: {
           type: "object",
@@ -108,17 +109,17 @@ export async function executeGPortalTool(
   args: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
   switch (name) {
-    case "gportal.ensure_session":
+    case "gportal_ensure_session":
       return gportalSession.ensureSession()
-    case "gportal.navigate":
+    case "gportal_navigate":
       return gportalSession.navigate(String(args.menuPath ?? ""))
-    case "meeting-room.search":
+    case "meeting_room_search":
       return gportalSession.searchMeetingRoom(args as Record<string, string>)
-    case "meeting-room.reserve":
+    case "meeting_room_reserve":
       return gportalSession.reserveMeetingRoom(args as Record<string, string>)
-    case "asset-export.submit":
+    case "asset_export_submit":
       return gportalSession.submitAssetExport(args as Record<string, string>)
-    case "vacation.apply":
+    case "vacation_apply":
       return gportalSession.applyVacation(args as Record<string, string>)
     default:
       return { success: false, error: `Unknown tool: ${name}` }

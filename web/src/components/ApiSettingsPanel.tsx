@@ -5,9 +5,14 @@ import { AnimatePresence, motion } from "framer-motion"
 import { Check, ChevronDown, KeyRound, Loader2 } from "lucide-react"
 import clsx from "clsx"
 
+type Provider = "openai" | "azure"
+
 export default function ApiSettingsPanel() {
   const [open, setOpen] = useState(false)
+  const [provider, setProvider] = useState<Provider>("openai")
   const [baseUrl, setBaseUrl] = useState("")
+  const [azureEndpoint, setAzureEndpoint] = useState("")
+  const [azureApiVersion, setAzureApiVersion] = useState("2024-10-21")
   const [apiKey, setApiKey] = useState("")
   const [model, setModel] = useState("gpt-5.5")
   const [hasKey, setHasKey] = useState(false)
@@ -22,12 +27,18 @@ export default function ApiSettingsPanel() {
       const res = await fetch("/api/settings/openai")
       if (!res.ok) return
       const data = (await res.json()) as {
+        provider?: Provider
         baseUrl: string
+        azureEndpoint?: string
+        azureApiVersion?: string
         model: string
         hasApiKey: boolean
         apiKeyMasked: string
       }
+      setProvider(data.provider === "azure" ? "azure" : "openai")
       setBaseUrl(data.baseUrl || "")
+      setAzureEndpoint(data.azureEndpoint || "")
+      setAzureApiVersion(data.azureApiVersion || "2024-10-21")
       setModel(data.model || "gpt-5.5")
       setHasKey(data.hasApiKey)
       setMasked(data.apiKeyMasked || "")
@@ -47,9 +58,15 @@ export default function ApiSettingsPanel() {
     setError(null)
     setSaved(false)
     try {
+      if (provider === "azure" && !azureEndpoint.trim()) {
+        throw new Error("Azure Endpoint URL을 입력하세요")
+      }
       const payload: Record<string, string> = {
+        provider,
         baseUrl: baseUrl.trim(),
-        model: model.trim() || "gpt-5.5"
+        azureEndpoint: azureEndpoint.trim(),
+        azureApiVersion: azureApiVersion.trim() || "2024-10-21",
+        model: model.trim() || (provider === "azure" ? "gpt-4o" : "gpt-5.5")
       }
       if (keyDirty && apiKey.trim()) {
         payload.apiKey = apiKey.trim()
@@ -64,12 +81,18 @@ export default function ApiSettingsPanel() {
         throw new Error(data?.error ?? "저장 실패")
       }
       const data = (await res.json()) as {
+        provider?: Provider
         baseUrl: string
+        azureEndpoint?: string
+        azureApiVersion?: string
         model: string
         hasApiKey: boolean
         apiKeyMasked: string
       }
+      setProvider(data.provider === "azure" ? "azure" : "openai")
       setBaseUrl(data.baseUrl || "")
+      setAzureEndpoint(data.azureEndpoint || "")
+      setAzureApiVersion(data.azureApiVersion || "2024-10-21")
       setModel(data.model || "gpt-5.5")
       setHasKey(data.hasApiKey)
       setMasked(data.apiKeyMasked || "")
@@ -119,17 +142,68 @@ export default function ApiSettingsPanel() {
             className="overflow-hidden"
           >
             <div className="space-y-2.5 px-1 pb-3 pt-1">
-              <label className="block">
-                <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-white/35">
-                  OpenAI Base URL
-                </span>
-                <input
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="https://api.openai.com/v1"
-                  className="glass-input w-full !text-[11.5px] font-mono"
-                />
-              </label>
+              <div className="flex gap-1.5">
+                {(
+                  [
+                    { id: "openai" as const, label: "OpenAI" },
+                    { id: "azure" as const, label: "Azure OpenAI" }
+                  ] as const
+                ).map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setProvider(p.id)}
+                    className={clsx(
+                      "flex-1 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors",
+                      provider === p.id
+                        ? "bg-white/15 text-white"
+                        : "bg-white/[0.04] text-white/50 hover:bg-white/[0.08]"
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {provider === "openai" ? (
+                <label className="block">
+                  <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-white/35">
+                    Base URL
+                  </span>
+                  <input
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    placeholder="https://api.openai.com/v1"
+                    className="glass-input w-full !text-[11.5px] font-mono"
+                  />
+                </label>
+              ) : (
+                <>
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-white/35">
+                      Azure Endpoint
+                    </span>
+                    <input
+                      value={azureEndpoint}
+                      onChange={(e) => setAzureEndpoint(e.target.value)}
+                      placeholder="https://YOUR_RESOURCE.openai.azure.com"
+                      className="glass-input w-full !text-[11.5px] font-mono"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-white/35">
+                      API Version
+                    </span>
+                    <input
+                      value={azureApiVersion}
+                      onChange={(e) => setAzureApiVersion(e.target.value)}
+                      placeholder="2024-10-21"
+                      className="glass-input w-full !text-[11.5px] font-mono"
+                    />
+                  </label>
+                </>
+              )}
+
               <label className="block">
                 <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-white/35">
                   API Key
@@ -147,19 +221,19 @@ export default function ApiSettingsPanel() {
                       setApiKey("")
                     }
                   }}
-                  placeholder="sk-…"
+                  placeholder="API key"
                   className="glass-input w-full !text-[11.5px] font-mono"
                   autoComplete="off"
                 />
               </label>
               <label className="block">
                 <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-white/35">
-                  Model
+                  {provider === "azure" ? "Deployment 이름" : "Model"}
                 </span>
                 <input
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  placeholder="gpt-5.5"
+                  placeholder={provider === "azure" ? "gpt-4o" : "gpt-5.5"}
                   className="glass-input w-full !text-[11.5px]"
                 />
               </label>

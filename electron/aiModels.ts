@@ -1,4 +1,4 @@
-export type APIProvider = "openai" | "gemini" | "anthropic"
+export type APIProvider = "openai" | "azure" | "anthropic"
 
 export type AIModelOption = {
   id: string
@@ -16,12 +16,11 @@ export const OPENAI_MODELS: AIModelOption[] = [
   { id: "gpt-4o-mini", name: "GPT-4o Mini", description: "레거시 경량 모델" }
 ]
 
-export const GEMINI_MODELS: AIModelOption[] = [
-  { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", description: "최신 Flash — 에이전트·코딩 최적화" },
-  { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro", description: "플래그십 추론 · 2M 컨텍스트" },
-  { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash-Lite", description: "고속 · 저비용 분류/추출" },
-  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "균형 잡힌 속도/비용" },
-  { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash-Lite", description: "대량 처리용 경량 모델" }
+/** Azure는 deployment 이름을 model로 사용 — 예시 값 */
+export const AZURE_MODELS: AIModelOption[] = [
+  { id: "gpt-5.5", name: "gpt-5.5 (deployment)", description: "Azure 배포 이름 예시" },
+  { id: "gpt-4o", name: "gpt-4o (deployment)", description: "Azure 배포 이름 예시" },
+  { id: "gpt-4o-mini", name: "gpt-4o-mini (deployment)", description: "Azure 배포 이름 예시" }
 ]
 
 export const ANTHROPIC_MODELS: AIModelOption[] = [
@@ -34,7 +33,7 @@ export const ANTHROPIC_MODELS: AIModelOption[] = [
 
 export const ALLOWED_MODELS: Record<APIProvider, string[]> = {
   openai: OPENAI_MODELS.map((m) => m.id),
-  gemini: GEMINI_MODELS.map((m) => m.id),
+  azure: AZURE_MODELS.map((m) => m.id),
   anthropic: ANTHROPIC_MODELS.map((m) => m.id)
 }
 
@@ -49,12 +48,12 @@ export const DEFAULT_MODELS: Record<
     agent: "gpt-5.5",
     classifier: "gpt-5.4-mini"
   },
-  gemini: {
-    extraction: "gemini-3.1-flash-lite",
-    solution: "gemini-3.5-flash",
-    debugging: "gemini-3.5-flash",
-    agent: "gemini-3.5-flash",
-    classifier: "gemini-3.1-flash-lite"
+  azure: {
+    extraction: "gpt-4o-mini",
+    solution: "gpt-4o",
+    debugging: "gpt-4o",
+    agent: "gpt-4o",
+    classifier: "gpt-4o-mini"
   },
   anthropic: {
     extraction: "claude-haiku-4-5",
@@ -65,13 +64,21 @@ export const DEFAULT_MODELS: Record<
   }
 }
 
+export const DEFAULT_AZURE_API_VERSION = "2024-10-21"
+
 export function sanitizeModelSelection(
   model: string,
   provider: APIProvider,
   role: "extraction" | "solution" | "debugging" | "agent" = "solution"
 ): string {
-  if (ALLOWED_MODELS[provider].includes(model)) {
-    return model
+  const trimmed = model?.trim()
+  if (!trimmed) return DEFAULT_MODELS[provider][role]
+
+  // Azure deployment 이름은 자유 형식
+  if (provider === "azure") return trimmed
+
+  if (ALLOWED_MODELS[provider].includes(trimmed)) {
+    return trimmed
   }
   const fallback = DEFAULT_MODELS[provider][role]
   console.warn(`Invalid ${provider} model '${model}'. Using ${fallback}.`)
