@@ -11,6 +11,35 @@ import { streamDatabricksEndpoint } from "./databricks"
 
 const MAX_ROUNDS = 8
 
+function normalizeAzureLikeBaseUrl(rawBaseUrl: string): {
+  baseUrl: string
+  apiVersion?: string
+  isAzure: boolean
+} {
+  const trimmed = rawBaseUrl.trim().replace(/\/$/, "")
+  if (!trimmed) {
+    return { baseUrl: "", isAzure: false }
+  }
+
+  const isAzure = trimmed.includes(".openai.azure.com")
+  if (!isAzure) {
+    return { baseUrl: trimmed, isAzure: false }
+  }
+
+  try {
+    const u = new URL(trimmed)
+    let pathname = u.pathname.replace(/\/$/, "")
+    if (pathname.endsWith("/chat/completions")) {
+      pathname = pathname.slice(0, -"/chat/completions".length)
+    }
+    const baseUrl = `${u.origin}${pathname}`
+    const apiVersion = u.searchParams.get("api-version") || undefined
+    return { baseUrl, apiVersion, isAzure: true }
+  } catch {
+    return { baseUrl: trimmed, isAzure: true }
+  }
+}
+
 function missingRequiredFields(
   agent: AgentRecord,
   collected: Record<string, unknown>
@@ -127,9 +156,16 @@ export async function runWebSuperAgent(options: {
       apiVersion: options.azureApiVersion || "2024-10-21"
     })
   } else {
+    const normalized = normalizeAzureLikeBaseUrl(options.baseURL || "")
+    const azureApiVersion =
+      normalized.apiVersion || process.env.OPENAI_API_VERSION || "2025-01-01-preview"
     client = new OpenAI({
       apiKey: options.apiKey,
-      baseURL: options.baseURL || undefined
+      baseURL: normalized.baseUrl || undefined,
+      ...(normalized.isAzure && {
+        defaultQuery: { "api-version": azureApiVersion },
+        defaultHeaders: { "api-key": options.apiKey }
+      })
     })
   }
 

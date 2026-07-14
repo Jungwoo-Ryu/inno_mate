@@ -8,6 +8,35 @@ function fingerprint(parts: string[]): string {
   return parts.join("::")
 }
 
+function normalizeAzureLikeBaseUrl(rawBaseUrl: string): {
+  baseUrl: string
+  apiVersion?: string
+  isAzure: boolean
+} {
+  const trimmed = rawBaseUrl.trim().replace(/\/$/, "")
+  if (!trimmed) {
+    return { baseUrl: "", isAzure: false }
+  }
+
+  const isAzure = trimmed.includes(".openai.azure.com")
+  if (!isAzure) {
+    return { baseUrl: trimmed, isAzure: false }
+  }
+
+  try {
+    const u = new URL(trimmed)
+    let pathname = u.pathname.replace(/\/$/, "")
+    if (pathname.endsWith("/chat/completions")) {
+      pathname = pathname.slice(0, -"/chat/completions".length)
+    }
+    const baseUrl = `${u.origin}${pathname}`
+    const apiVersion = u.searchParams.get("api-version") || undefined
+    return { baseUrl, apiVersion, isAzure: true }
+  } catch {
+    return { baseUrl: trimmed, isAzure: true }
+  }
+}
+
 export function resetOpenAIClient(): void {
   client = null
   clientFingerprint = ""
@@ -48,14 +77,23 @@ export function getOpenAIClient(): OpenAI {
   const fp = fingerprint([
     "openai",
     s.baseUrl,
+    process.env.OPENAI_API_VERSION || "",
     s.apiKey.slice(0, 8),
     String(s.apiKey.length)
   ])
   if (client && clientFingerprint === fp) return client
 
+  const normalized = normalizeAzureLikeBaseUrl(s.baseUrl)
+  const azureApiVersion =
+    normalized.apiVersion || process.env.OPENAI_API_VERSION || "2025-01-01-preview"
+
   client = new OpenAI({
     apiKey: s.apiKey,
-    baseURL: s.baseUrl || undefined
+    baseURL: normalized.baseUrl || undefined,
+    ...(normalized.isAzure && {
+      defaultQuery: { "api-version": azureApiVersion },
+      defaultHeaders: { "api-key": s.apiKey }
+    })
   })
   clientFingerprint = fp
   return client
@@ -79,7 +117,10 @@ export function resolveOpenAICredentials(): {
   }
   return {
     apiKey: s.apiKey,
-    baseURL: s.provider === "openai" ? s.baseUrl || undefined : undefined,
+    baseURL:
+      s.provider === "openai"
+        ? normalizeAzureLikeBaseUrl(s.baseUrl).baseUrl || undefined
+        : undefined,
     model: s.model,
     provider: s.provider,
     azureEndpoint: s.azureEndpoint || undefined,
